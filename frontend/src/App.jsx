@@ -8,7 +8,7 @@ import ArubaView from './views/ArubaView'
 import AlletraView from './views/AlletraView'
 import VeeamView from './views/VeeamView'
 import SettingsView from './views/SettingsView'
-
+import AlertsView from './views/AlertsView'
 import SurgeView from './views/SurgeView'
 
 const NAV = [
@@ -18,6 +18,7 @@ const NAV = [
   { id: 'aruba',    label: 'Networking',     icon: 'ti-network' },
   { id: 'alletra',  label: 'Storage',        icon: 'ti-database' },
   { id: 'veeam',    label: 'Backups',        icon: 'ti-cloud-upload' },
+  { id: 'alerts',   label: 'Alerts',         icon: 'ti-bell' },
 ]
 
 function StatusDot({ status }) {
@@ -31,6 +32,7 @@ export default function App() {
   const [view, setView] = useState('summary')
   const [summary, setSummary] = useState(null)
   const [history, setHistory] = useState([])
+  const [activeAlertCount, setActiveAlertCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [lastRefresh, setLastRefresh] = useState(null)
   const [error, setError] = useState(null)
@@ -84,8 +86,19 @@ export default function App() {
     }
   }, [ready])
 
+  const refreshAlertCount = useCallback(async () => {
+    if (!ready) return
+    try {
+      const s = await api.alertStatus()
+      setActiveAlertCount(s.active_count ?? 0)
+    } catch {
+      // best-effort
+    }
+  }, [ready])
+
   useEffect(() => { refresh() }, [refresh])
   useEffect(() => { refreshHistory() }, [refreshHistory])
+  useEffect(() => { refreshAlertCount() }, [refreshAlertCount])
   useEffect(() => {
     if (!ready) return
     const t = setInterval(refresh, 60_000)
@@ -96,6 +109,11 @@ export default function App() {
     const t = setInterval(refreshHistory, 900_000) // 15 min
     return () => clearInterval(t)
   }, [refreshHistory, ready])
+  useEffect(() => {
+    if (!ready) return
+    const t = setInterval(refreshAlertCount, 60_000)
+    return () => clearInterval(t)
+  }, [refreshAlertCount, ready])
 
   // ── Gates (all hooks above this line) ─────────────────────────────────────
 
@@ -144,7 +162,14 @@ export default function App() {
             >
               <i className={`ti ${n.icon}`} aria-hidden="true" />
               {n.label}
-              {n.id !== 'summary' && subsystemStatus[n.id] && (
+              {n.id === 'alerts' && activeAlertCount > 0 && (
+                <span style={{
+                  marginLeft: 'auto', fontSize: 10, fontWeight: 700,
+                  background: 'var(--c-crit)', color: '#fff',
+                  borderRadius: 10, padding: '1px 6px', lineHeight: 1.4,
+                }}>{activeAlertCount}</span>
+              )}
+              {n.id !== 'summary' && n.id !== 'alerts' && subsystemStatus[n.id] && (
                 <StatusDot status={subsystemStatus[n.id]} />
               )}
             </button>
@@ -204,6 +229,7 @@ export default function App() {
                 {view === 'aruba'    && <ArubaView data={summary?.aruba} />}
                 {view === 'alletra'  && <AlletraView data={summary?.alletra} />}
                 {view === 'veeam'    && <VeeamView data={summary?.veeam} />}
+                {view === 'alerts'   && <AlertsView />}
                 {view === 'settings' && <SettingsView />}
               </>
           }

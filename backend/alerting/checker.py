@@ -118,32 +118,33 @@ def _evaluate(s) -> list[dict]:
 def run_check() -> None:
     global _active
     s = get_settings()
-    if not s.webhook_url:
-        return
 
     breaches = _evaluate(s)
     breach_keys = {b["key"] for b in breaches}
 
-    new_alerts   = [b for b in breaches if b["key"] not in _active]
+    new_alerts    = [b for b in breaches if b["key"] not in _active]
     resolved_keys = _active - breach_keys
 
     if new_alerts:
-        logger.info(f"Firing alert: {[b['key'] for b in new_alerts]}")
-        try:
-            send_webhook(s.webhook_url, s.webhook_format, new_alerts, event="alert")
-            _push_history("alert", new_alerts)
-        except Exception as e:
-            logger.error(f"Webhook send failed: {e}")
+        logger.info(f"Alert breach: {[b['key'] for b in new_alerts]}")
+        _push_history("alert", new_alerts)
+        if s.webhook_url:
+            try:
+                send_webhook(s.webhook_url, s.webhook_format, new_alerts, event="alert")
+            except Exception as e:
+                logger.error(f"Webhook send failed: {e}")
 
     if resolved_keys:
         resolved = [{"key": k, "system": k.split("_")[0].title(),
                      "message": "Condition resolved", "severity": "ok"}
                     for k in resolved_keys]
-        try:
-            send_webhook(s.webhook_url, s.webhook_format, resolved, event="resolved")
-            _push_history("resolved", resolved)
-        except Exception as e:
-            logger.error(f"Resolved webhook send failed: {e}")
+        logger.info(f"Alert resolved: {list(resolved_keys)}")
+        _push_history("resolved", resolved)
+        if s.webhook_url:
+            try:
+                send_webhook(s.webhook_url, s.webhook_format, resolved, event="resolved")
+            except Exception as e:
+                logger.error(f"Resolved webhook send failed: {e}")
 
     _active = breach_keys
 
