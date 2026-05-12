@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     Infra Glassplane — full Windows build pipeline.
@@ -126,17 +126,15 @@ if (-not $SkipIcons) {
     }
 }
 
-# ── 2. Python backend → PyInstaller .exe ──────────────────────────────────────
+# ── 2. Python backend -> PyInstaller .exe ─────────────────────────────────────
 
 if (-not $SkipBackend) {
     Write-Step 'Step 2/4 — Compiling FastAPI backend (PyInstaller)'
     Push-Location $BackendDir
 
     Write-Host '  Running PyInstaller...'
-    python -m PyInstaller glassplane-backend.spec `
-        --distpath dist `
-        --workpath build `
-        --noconfirm
+    $pyiArgs = @('glassplane-backend.spec', '--distpath', 'dist', '--workpath', 'build', '--noconfirm')
+    python -m PyInstaller @pyiArgs
 
     Pop-Location
 
@@ -169,7 +167,7 @@ if (-not $SkipFrontend) {
     Write-Step 'Step 3/4 — Skipping frontend build (-SkipFrontend)'
 }
 
-# ── 4. electron-builder → NSIS installer ────────────────────────────────────
+# ── 4. electron-builder -> NSIS installer ───────────────────────────────────
 
 Write-Step 'Step 4/4 — Packaging with electron-builder (NSIS)'
 Push-Location $Root
