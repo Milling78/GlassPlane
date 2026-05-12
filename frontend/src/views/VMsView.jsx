@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { api } from '../api'
 
 function UtilCell({ pct, off }) {
@@ -10,6 +10,35 @@ function UtilCell({ pct, off }) {
         <div className={`bar-fill ${barCls}`} style={{ width: (off ? 0 : pct) + '%' }} />
       </div>
       <span className={`util-pct ${pctCls}`}>{off ? '—' : pct + '%'}</span>
+    </div>
+  )
+}
+
+function Chip({ label, active, onClick, color }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        fontSize: 11, fontFamily: 'var(--mono)', padding: '3px 10px',
+        borderRadius: 12, border: `0.5px solid ${active ? (color ?? 'var(--c-blue)') : 'var(--border)'}`,
+        background: active ? (color ?? 'var(--c-blue)') : 'transparent',
+        color: active ? '#fff' : 'var(--muted)',
+        cursor: 'pointer', transition: 'all 0.1s',
+      }}
+    >{label}</button>
+  )
+}
+
+function ThresholdInput({ label, value, onChange, unit = '%' }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, fontFamily: 'var(--mono)', color: 'var(--muted)' }}>
+      <span>{label} ≥</span>
+      <input
+        type="number" min={0} max={100} value={value}
+        onChange={e => onChange(Math.max(0, Math.min(100, Number(e.target.value))))}
+        style={{ width: 48, fontSize: 12, padding: '3px 6px', textAlign: 'right' }}
+      />
+      <span>{unit}</span>
     </div>
   )
 }
@@ -27,23 +56,43 @@ function exportCSV(vms) {
 
 const COLS = [
   { key: 'name',             label: 'VM name',    w: '18%' },
-  { key: 'cluster',          label: 'cluster',    w: '12%' },
-  { key: 'host',             label: 'host',       w: '14%' },
-  { key: 'power_state',      label: 'state',      w: '7%'  },
+  { key: 'cluster',          label: 'cluster',    w: '11%' },
+  { key: 'host',             label: 'host',       w: '13%' },
+  { key: 'power_state',      label: 'state',      w: '6%'  },
   { key: 'cpu_util_pct',     label: 'CPU %',      w: '10%' },
   { key: 'ram_util_pct',     label: 'RAM %',      w: '10%' },
   { key: 'cpu_allocated_mhz',label: 'CPU alloc',  w: '9%'  },
-  { key: 'ram_allocated_mb', label: 'RAM alloc',  w: '9%'  },
+  { key: 'ram_allocated_mb', label: 'RAM alloc',  w: '8%'  },
   { key: 'datastore_gb',     label: 'disk GB',    w: '7%'  },
   { key: 'flags',            label: 'flags',      w: '8%'  },
 ]
+
+// Which flags are active for a given VM
+function vmFlags(v) {
+  const f = new Set()
+  if (v.is_idle)                     f.add('idle')
+  if (v.is_oversized)                f.add('oversized')
+  if (v.power_state !== 'poweredOn') f.add('off')
+  if (!v.is_idle && !v.is_oversized && v.power_state === 'poweredOn') f.add('healthy')
+  return f
+}
+
+const FLAG_COLORS = {
+  idle:      'var(--c-warn)',
+  oversized: '#a855f7',
+  off:       'var(--muted)',
+  healthy:   'var(--c-green)',
+}
 
 export default function VMsView({ vcenter }) {
   const [vms, setVms] = useState(vcenter?.vms ?? [])
   const [loading, setLoading] = useState(!vcenter?.vms?.length)
   const [search, setSearch] = useState('')
   const [clusterFilter, setClusterFilter] = useState('all')
-  const [flagFilter, setFlagFilter] = useState('all')
+  const [hostFilter, setHostFilter] = useState('all')
+  const [activeFlags, setActiveFlags] = useState(new Set())  // empty = show all
+  const [cpuMin, setCpuMin] = useState(0)
+  const [ramMin, setRamMin] = useState(0)
   const [sortKey, setSortKey] = useState('cpu_util_pct')
   const [sortDir, setSortDir] = useState('desc')
 
@@ -54,65 +103,115 @@ export default function VMsView({ vcenter }) {
   }, [vcenter])
 
   const clusters = useMemo(() => ['all', ...new Set(vms.map(v => v.cluster))], [vms])
+  const hosts    = useMemo(() => {
+    const src = clusterFilter === 'all' ? vms : vms.filter(v => v.cluster === clusterFilter)
+    return ['all', ...new Set(src.map(v => v.host))]
+  }, [vms, clusterFilter])
+
+  function toggleFlag(flag) {
+    setActiveFlags(prev => {
+      const next = new Set(prev)
+      next.has(flag) ? next.delete(flag) : next.add(flag)
+      return next
+    })
+  }
+
+  function clearFilters() {
+    setSearch('')
+    setClusterFilter('all')
+    setHostFilter('all')
+    setActiveFlags(new Set())
+    setCpuMin(0)
+    setRamMin(0)
+  }
+
+  const isFiltered = search || clusterFilter !== 'all' || hostFilter !== 'all' || activeFlags.size > 0 || cpuMin > 0 || ramMin > 0
 
   const filtered = useMemo(() => {
     let r = vms
     if (clusterFilter !== 'all') r = r.filter(v => v.cluster === clusterFilter)
-    if (flagFilter === 'idle')      r = r.filter(v => v.is_idle)
-    else if (flagFilter === 'oversized') r = r.filter(v => v.is_oversized)
-    else if (flagFilter === 'off')  r = r.filter(v => v.power_state !== 'poweredOn')
-    else if (flagFilter === 'clean') r = r.filter(v => !v.is_idle && !v.is_oversized && v.power_state === 'poweredOn')
+    if (hostFilter !== 'all')    r = r.filter(v => v.host === hostFilter)
+    if (activeFlags.size > 0)    r = r.filter(v => [...activeFlags].some(f => vmFlags(v).has(f)))
+    if (cpuMin > 0) r = r.filter(v => v.power_state === 'poweredOn' && v.cpu_util_pct >= cpuMin)
+    if (ramMin > 0) r = r.filter(v => v.power_state === 'poweredOn' && v.ram_util_pct >= ramMin)
     if (search.trim()) {
       const q = search.toLowerCase()
-      r = r.filter(v => v.name.toLowerCase().includes(q) || v.host.toLowerCase().includes(q))
+      r = r.filter(v => v.name.toLowerCase().includes(q) || v.host.toLowerCase().includes(q) || v.cluster.toLowerCase().includes(q))
     }
     return [...r].sort((a, b) => {
       let av = a[sortKey], bv = b[sortKey]
       if (typeof av === 'string') { av = av.toLowerCase(); bv = bv.toLowerCase() }
       return sortDir === 'asc' ? (av > bv ? 1 : -1) : (av < bv ? 1 : -1)
     })
-  }, [vms, clusterFilter, flagFilter, search, sortKey, sortDir])
+  }, [vms, clusterFilter, hostFilter, activeFlags, cpuMin, ramMin, search, sortKey, sortDir])
 
   function toggleSort(key) {
     if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
     else { setSortKey(key); setSortDir('desc') }
   }
 
-  const idleCount     = vms.filter(v => v.is_idle).length
-  const oversizedCount= vms.filter(v => v.is_oversized).length
-  const wastedRam     = Math.round(vms.filter(v => v.is_oversized).reduce((s,v) => s + (v.ram_allocated_mb - v.ram_used_mb)/1024, 0))
-  const wastedCpu     = vms.filter(v => v.is_oversized).reduce((s,v) => s + (v.cpu_allocated_mhz - v.cpu_used_mhz)/1000, 0).toFixed(1)
+  const idleCount      = vms.filter(v => v.is_idle).length
+  const oversizedCount = vms.filter(v => v.is_oversized).length
+  const wastedRam      = Math.round(vms.filter(v => v.is_oversized).reduce((s,v) => s + (v.ram_allocated_mb - v.ram_used_mb)/1024, 0))
+  const wastedCpu      = vms.filter(v => v.is_oversized).reduce((s,v) => s + (v.cpu_allocated_mhz - v.cpu_used_mhz)/1000, 0).toFixed(1)
 
   if (loading) return <div style={{ padding: '3rem', textAlign: 'center', fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--muted)' }}>loading VMs…</div>
 
   return (
     <div>
-      {/* Stats */}
+      {/* Stats — clickable to set quick filters */}
       <div className="metrics" style={{ marginBottom: '1rem' }}>
         <div className="metric"><div className="metric-label">total VMs</div><div className="metric-val">{vms.length}</div><div className="metric-sub">{vms.filter(v=>v.power_state==='poweredOn').length} powered on</div></div>
-        <div className="metric"><div className="metric-label">idle VMs</div><div className="metric-val" style={{ color: idleCount > 3 ? 'var(--c-warn)' : undefined }}>{idleCount}</div><div className="metric-sub">CPU avg &lt; 5%</div></div>
-        <div className="metric"><div className="metric-label">oversized VMs</div><div className="metric-val" style={{ color: oversizedCount > 3 ? 'var(--c-warn)' : undefined }}>{oversizedCount}</div></div>
+        <div className="metric" style={{ cursor: 'pointer' }} title="filter to idle VMs" onClick={() => toggleFlag('idle')}>
+          <div className="metric-label">idle</div>
+          <div className="metric-val" style={{ color: idleCount > 3 ? 'var(--c-warn)' : undefined }}>{idleCount}</div>
+          <div className="metric-sub">CPU avg &lt; 5%</div>
+        </div>
+        <div className="metric" style={{ cursor: 'pointer' }} title="filter to oversized VMs" onClick={() => toggleFlag('oversized')}>
+          <div className="metric-label">oversized</div>
+          <div className="metric-val" style={{ color: oversizedCount > 3 ? 'var(--c-warn)' : undefined }}>{oversizedCount}</div>
+        </div>
         <div className="metric"><div className="metric-label">wasted RAM</div><div className="metric-val" style={{ color: wastedRam > 20 ? 'var(--c-warn)' : undefined }}>{wastedRam}GB</div></div>
         <div className="metric"><div className="metric-label">wasted CPU</div><div className="metric-val">{wastedCpu}GHz</div></div>
       </div>
 
-      {/* Toolbar */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
-        <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="search name or host…" style={{ flex: 1, minWidth: 180, fontSize: 13 }} />
-        <select value={clusterFilter} onChange={e => setClusterFilter(e.target.value)} style={{ fontSize: 13 }}>
+      {/* Toolbar row 1: search + dropdowns */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+        <input
+          type="text" value={search} onChange={e => setSearch(e.target.value)}
+          placeholder="search name, host or cluster…"
+          style={{ flex: 1, minWidth: 200, fontSize: 13 }}
+        />
+        <select value={clusterFilter} onChange={e => { setClusterFilter(e.target.value); setHostFilter('all') }} style={{ fontSize: 13 }}>
           {clusters.map(c => <option key={c} value={c}>{c === 'all' ? 'all clusters' : c}</option>)}
         </select>
-        <select value={flagFilter} onChange={e => setFlagFilter(e.target.value)} style={{ fontSize: 13 }}>
-          <option value="all">all VMs</option>
-          <option value="idle">idle only</option>
-          <option value="oversized">oversized only</option>
-          <option value="off">powered off</option>
-          <option value="clean">healthy only</option>
+        <select value={hostFilter} onChange={e => setHostFilter(e.target.value)} style={{ fontSize: 13 }}>
+          {hosts.map(h => <option key={h} value={h}>{h === 'all' ? 'all hosts' : h}</option>)}
         </select>
-        <span style={{ fontSize: 12, fontFamily: 'var(--mono)', color: 'var(--muted)' }}>{filtered.length} of {vms.length}</span>
-        <button onClick={() => exportCSV(filtered)} style={{ fontSize: 12 }}>
-          <i className="ti ti-download" style={{ marginRight: 4 }} aria-hidden="true" />export CSV
-        </button>
+      </div>
+
+      {/* Toolbar row 2: flag chips + thresholds + count */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
+        <span style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--muted)' }}>show:</span>
+        {['idle','oversized','off','healthy'].map(f => (
+          <Chip key={f} label={f} active={activeFlags.has(f)} color={FLAG_COLORS[f]} onClick={() => toggleFlag(f)} />
+        ))}
+        <div style={{ width: 1, height: 18, background: 'var(--border)', margin: '0 4px' }} />
+        <ThresholdInput label="CPU" value={cpuMin} onChange={setCpuMin} />
+        <ThresholdInput label="RAM" value={ramMin} onChange={setRamMin} />
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
+          <span style={{ fontSize: 12, fontFamily: 'var(--mono)', color: 'var(--muted)' }}>
+            {filtered.length} of {vms.length}
+          </span>
+          {isFiltered && (
+            <button onClick={clearFilters} style={{ fontSize: 11, color: 'var(--muted)', background: 'transparent', border: '0.5px solid var(--border)', borderRadius: 4, padding: '2px 8px', cursor: 'pointer' }}>
+              clear
+            </button>
+          )}
+          <button onClick={() => exportCSV(filtered)} style={{ fontSize: 12 }}>
+            <i className="ti ti-download" style={{ marginRight: 4 }} aria-hidden="true" />export CSV
+          </button>
+        </div>
       </div>
 
       {/* Table */}
@@ -124,7 +223,7 @@ export default function VMsView({ vcenter }) {
               <tr>
                 {COLS.map(c => (
                   <th key={c.key} onClick={() => toggleSort(c.key)}
-                    style={{ color: sortKey === c.key ? 'var(--c-blue)' : undefined }}>
+                    style={{ cursor: 'pointer', color: sortKey === c.key ? 'var(--c-blue)' : undefined }}>
                     {c.label}
                     <span style={{ opacity: sortKey === c.key ? 1 : 0.3, marginLeft: 3, fontSize: 10 }}>
                       {sortKey === c.key ? (sortDir === 'asc' ? '↑' : '↓') : '↕'}
@@ -142,7 +241,7 @@ export default function VMsView({ vcenter }) {
                     <tr key={vm.vm_id}>
                       <td title={vm.name} style={{ fontWeight: 500 }}>{vm.name}</td>
                       <td>{vm.cluster}</td>
-                      <td>{vm.host}</td>
+                      <td style={{ fontSize: 11, color: 'var(--muted)' }}>{vm.host}</td>
                       <td><span className={`badge ${off ? 'b-off' : 'b-on'}`}>{off ? 'off' : 'on'}</span></td>
                       <td><UtilCell pct={Math.round(vm.cpu_util_pct)} off={off} /></td>
                       <td><UtilCell pct={Math.round(vm.ram_util_pct)} off={off} /></td>
@@ -150,7 +249,7 @@ export default function VMsView({ vcenter }) {
                       <td>{vm.ram_allocated_mb >= 1024 ? Math.round(vm.ram_allocated_mb/1024)+'GB' : vm.ram_allocated_mb+'MB'}</td>
                       <td>{Math.round(vm.datastore_gb)}GB</td>
                       <td>
-                        <div style={{ display: 'flex', gap: 3 }}>
+                        <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
                           {vm.is_idle      && <span className="badge b-idle">idle</span>}
                           {vm.is_oversized && <span className="badge b-oversized">oversized</span>}
                           {off             && <span className="badge b-off">off</span>}
