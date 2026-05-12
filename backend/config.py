@@ -37,6 +37,29 @@ class Settings(BaseSettings):
     api_key: str = ""
     allowed_origins: str = "*"
 
+    # Alerting
+    webhook_url: str = ""
+    webhook_format: str = "teams"       # teams | slack | generic
+    alert_interval_seconds: int = 300   # 5 minutes
+
+    # vCenter thresholds
+    alert_vcenter_idle_vms: int = 1
+    alert_vcenter_oversized_vms: int = 5
+    alert_vcenter_cluster_cpu_low_pct: float = 30.0
+
+    # Aruba thresholds
+    alert_aruba_unused_port_pct: float = 30.0
+
+    # Alletra thresholds
+    alert_alletra_util_high_pct: float = 80.0
+    alert_alletra_util_low_pct: float = 20.0
+    alert_alletra_efficiency_min: float = 2.0
+
+    # Veeam thresholds
+    alert_veeam_failed_jobs: int = 1
+    alert_veeam_unprotected_vms: int = 1
+    alert_veeam_repo_util_pct: float = 80.0
+
 
 @lru_cache
 def get_settings() -> Settings:

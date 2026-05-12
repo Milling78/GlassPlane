@@ -2,6 +2,47 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { apiFetch, getBaseUrl } from '../api'
 import { buildEnvContent } from '../utils/env'
 
+function ThresholdField({ label, value, onChange, unit = '', min = 0, step = 1, width = 72 }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+      <label style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+        {label}
+      </label>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+        <input
+          type="number"
+          value={value}
+          min={min}
+          step={step}
+          onChange={e => onChange(parseFloat(e.target.value) || 0)}
+          style={{
+            width, background: 'var(--bg)', border: '0.5px solid var(--border)',
+            borderRadius: 6, padding: '0.35rem 0.5rem',
+            color: 'var(--text)', fontFamily: 'var(--mono)', fontSize: 12, outline: 'none',
+          }}
+        />
+        {unit && <span style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'var(--mono)' }}>{unit}</span>}
+      </div>
+    </div>
+  )
+}
+
+function ThresholdGrid({ children }) {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '0.75rem' }}>
+      {children}
+    </div>
+  )
+}
+
+function SubHeading({ children }) {
+  return (
+    <div style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', paddingTop: 4 }}>
+      {children}
+    </div>
+  )
+}
+
 // ── Shared field components ───────────────────────────────────────────────────
 
 function Field({ label, value, onChange, type = 'text', placeholder = '', mono = true }) {
@@ -147,6 +188,9 @@ export default function SettingsView() {
   const [saveStatus, setSaveStatus] = useState('idle')  // idle | saving | saved | error | copied
   const [saveMsg,    setSaveMsg]    = useState('')
   const [showEnv,    setShowEnv]    = useState(false)
+  const [alertStatus, setAlertStatus] = useState(null)  // { active_count, active }
+  const [testWebhook, setTestWebhook] = useState('idle') // idle | sending | ok | error
+  const [testWebhookMsg, setTestWebhookMsg] = useState('')
 
   const u = useCallback((section, field, value) => {
     setCfg(c => section
@@ -161,11 +205,29 @@ export default function SettingsView() {
       .then(data => setCfg(data))
       .catch(e => setLoadErr(e.message))
 
+    apiFetch('/api/alerts/status')
+      .then(setAlertStatus)
+      .catch(() => {})
+
     getBaseUrl().then(b => {
       setBaseUrl(b || 'http://localhost:8000')
       fetch((b || '') + '/health').then(r => r.json()).then(setHealth).catch(() => setHealth(null))
     })
   }, [])
+
+  async function sendTestWebhook() {
+    setTestWebhook('sending')
+    setTestWebhookMsg('')
+    try {
+      const r = await apiFetch('/api/alerts/test', { method: 'POST' })
+      setTestWebhook('ok')
+      setTestWebhookMsg(r.message)
+    } catch (e) {
+      setTestWebhook('error')
+      setTestWebhookMsg(e.message)
+    }
+    setTimeout(() => setTestWebhook('idle'), 5000)
+  }
 
   async function handleSave() {
     setSaveStatus('saving')
@@ -332,6 +394,104 @@ export default function SettingsView() {
           </div>
         </Row>
       </Section>
+
+      {/* Alerts */}
+      {cfg.alerts && (() => {
+        const al = cfg.alerts
+        const ua = (f, v) => u('alerts', f, v)
+        return (
+          <Section icon="ti-bell" title="Alerts & Webhooks"
+            badge={alertStatus?.active_count > 0
+              ? <span className="badge b-oversized">{alertStatus.active_count} active</span>
+              : alertStatus ? <span className="badge b-on">all clear</span> : null}>
+
+            {/* Active alerts */}
+            {alertStatus?.active_count > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <SubHeading>Currently firing</SubHeading>
+                {alertStatus.active.map(key => (
+                  <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 6, fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--c-crit)' }}>
+                    <i className="ti ti-alert-circle" aria-hidden="true" />{key}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Webhook config */}
+            <SubHeading>Webhook</SubHeading>
+            <Field label="WEBHOOK URL" value={al.webhookUrl} onChange={v => ua('webhookUrl', v)} placeholder="https://…" />
+            <Row>
+              <div style={{ flex: 1 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <label style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--muted)' }}>FORMAT</label>
+                  <select
+                    value={al.webhookFormat}
+                    onChange={e => ua('webhookFormat', e.target.value)}
+                    style={{ background: 'var(--bg)', border: '0.5px solid var(--border)', borderRadius: 6, padding: '0.45rem 0.65rem', color: 'var(--text)', fontFamily: 'var(--mono)', fontSize: 12, outline: 'none' }}
+                  >
+                    <option value="teams">Microsoft Teams</option>
+                    <option value="slack">Slack</option>
+                    <option value="generic">Generic JSON</option>
+                  </select>
+                </div>
+              </div>
+              <div style={{ flex: 1 }}>
+                <ThresholdField label="Check interval" value={al.alertIntervalMinutes} onChange={v => ua('alertIntervalMinutes', v)} unit="min" min={1} step={1} width={64} />
+              </div>
+            </Row>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <button
+                onClick={sendTestWebhook}
+                disabled={!al.webhookUrl || testWebhook === 'sending'}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  background: 'var(--bg)', border: '0.5px solid var(--border)',
+                  borderRadius: 6, padding: '0.4rem 0.75rem',
+                  fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)',
+                  cursor: !al.webhookUrl || testWebhook === 'sending' ? 'not-allowed' : 'pointer',
+                  opacity: !al.webhookUrl ? 0.5 : 1,
+                }}
+              >
+                <i className={`ti ${testWebhook === 'sending' ? 'ti-loader-2' : 'ti-send'}`} aria-hidden="true" />
+                {testWebhook === 'sending' ? 'Sending…' : 'Send test'}
+              </button>
+              {testWebhookMsg && (
+                <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: testWebhook === 'error' ? 'var(--c-crit)' : 'var(--c-ok)' }}>
+                  <i className={`ti ${testWebhook === 'error' ? 'ti-circle-x' : 'ti-circle-check'}`} style={{ marginRight: 4 }} aria-hidden="true" />
+                  {testWebhookMsg}
+                </span>
+              )}
+            </div>
+
+            {/* Thresholds */}
+            <SubHeading>vCenter thresholds</SubHeading>
+            <ThresholdGrid>
+              <ThresholdField label="Idle VMs ≥" value={al.vcenterIdleVms} onChange={v => ua('vcenterIdleVms', v)} unit="VMs" min={1} />
+              <ThresholdField label="Oversized VMs ≥" value={al.vcenterOversizedVms} onChange={v => ua('vcenterOversizedVms', v)} unit="VMs" min={1} />
+              <ThresholdField label="Cluster CPU low <" value={al.vcenterClusterCpuLowPct} onChange={v => ua('vcenterClusterCpuLowPct', v)} unit="%" min={0} step={5} />
+            </ThresholdGrid>
+
+            <SubHeading>Aruba thresholds</SubHeading>
+            <ThresholdGrid>
+              <ThresholdField label="Unused ports >" value={al.arubaUnusedPortPct} onChange={v => ua('arubaUnusedPortPct', v)} unit="%" min={0} step={5} />
+            </ThresholdGrid>
+
+            <SubHeading>Alletra thresholds</SubHeading>
+            <ThresholdGrid>
+              <ThresholdField label="Storage high >" value={al.alletraUtilHighPct} onChange={v => ua('alletraUtilHighPct', v)} unit="%" min={0} step={5} />
+              <ThresholdField label="Storage low <" value={al.alletraUtilLowPct} onChange={v => ua('alletraUtilLowPct', v)} unit="%" min={0} step={5} />
+              <ThresholdField label="Efficiency min" value={al.alletraEfficiencyMin} onChange={v => ua('alletraEfficiencyMin', v)} unit=":1" min={0} step={0.1} />
+            </ThresholdGrid>
+
+            <SubHeading>Veeam thresholds</SubHeading>
+            <ThresholdGrid>
+              <ThresholdField label="Failed jobs ≥" value={al.veeamFailedJobs} onChange={v => ua('veeamFailedJobs', v)} unit="jobs" min={1} />
+              <ThresholdField label="Unprotected VMs ≥" value={al.veeamUnprotectedVms} onChange={v => ua('veeamUnprotectedVms', v)} unit="VMs" min={1} />
+              <ThresholdField label="Repo util >" value={al.veeamRepoUtilPct} onChange={v => ua('veeamRepoUtilPct', v)} unit="%" min={0} step={5} />
+            </ThresholdGrid>
+          </Section>
+        )
+      })()}
 
       {/* Save */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: '1.5rem' }}>

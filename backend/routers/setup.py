@@ -48,6 +48,21 @@ def get_config():
         },
         "cacheTtl":  s.cache_ttl_seconds,
         "logLevel":  s.log_level,
+        "alerts": {
+            "webhookUrl":             s.webhook_url,
+            "webhookFormat":          s.webhook_format,
+            "alertIntervalMinutes":   s.alert_interval_seconds // 60,
+            "vcenterIdleVms":         s.alert_vcenter_idle_vms,
+            "vcenterOversizedVms":    s.alert_vcenter_oversized_vms,
+            "vcenterClusterCpuLowPct": s.alert_vcenter_cluster_cpu_low_pct,
+            "arubaUnusedPortPct":     s.alert_aruba_unused_port_pct,
+            "alletraUtilHighPct":     s.alert_alletra_util_high_pct,
+            "alletraUtilLowPct":      s.alert_alletra_util_low_pct,
+            "alletraEfficiencyMin":   s.alert_alletra_efficiency_min,
+            "veeamFailedJobs":        s.alert_veeam_failed_jobs,
+            "veeamUnprotectedVms":    s.alert_veeam_unprotected_vms,
+            "veeamRepoUtilPct":       s.alert_veeam_repo_util_pct,
+        },
     }
 
 
