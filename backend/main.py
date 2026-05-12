@@ -10,7 +10,9 @@ from routers.api import vcenter_router, aruba_router, alletra_router, veeam_rout
 from routers.auth import auth_router
 from routers.setup import setup_router
 from routers.alerts import alerts_router
+from routers.history import history_router
 from alerting.checker import alert_loop
+from history.snapshotter import snapshot_loop
 
 settings = get_settings()
 logging.basicConfig(level=settings.log_level)
@@ -20,13 +22,16 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Infra Glassplane API starting up")
-    task = asyncio.create_task(alert_loop())
+    alert_task = asyncio.create_task(alert_loop())
+    snap_task = asyncio.create_task(snapshot_loop())
     yield
-    task.cancel()
-    try:
-        await task
-    except asyncio.CancelledError:
-        pass
+    alert_task.cancel()
+    snap_task.cancel()
+    for t in (alert_task, snap_task):
+        try:
+            await t
+        except asyncio.CancelledError:
+            pass
     logger.info("Infra Glassplane API shutting down")
 
 
@@ -55,6 +60,7 @@ app.include_router(alletra_router, prefix="/api")
 app.include_router(veeam_router, prefix="/api")
 app.include_router(glassplane_router, prefix="/api")
 app.include_router(surge_router, prefix="/api")
+app.include_router(history_router, prefix="/api")
 
 
 @app.get("/health")

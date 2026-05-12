@@ -1,6 +1,37 @@
-import React from 'react'
+import React, { useState, useEffect } from 'react'
+import { api } from '../api'
+import Sparkline from '../components/Sparkline'
+
 const STATUS_CLS = { Success: 'b-on', Warning: 'b-idle', Failed: 'b-oversized', Running: 'b-off', None: 'b-off' }
+
+const RANGES = [
+  { label: '24h', hours: 24 },
+  { label: '3d',  hours: 72 },
+  { label: '7d',  hours: 168 },
+]
+
+function TrendRow({ label, data, color, unit = '' }) {
+  const vals = data.filter(v => v != null)
+  const last = vals[vals.length - 1]
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--muted)', marginBottom: 4 }}>
+        <span>{label}</span>
+        {last != null && <span style={{ color: 'var(--text)' }}>{typeof last === 'number' && !Number.isInteger(last) ? last.toFixed(1) : last}{unit}</span>}
+      </div>
+      <Sparkline data={data} color={color} height={36} />
+    </div>
+  )
+}
+
 export default function VeeamView({ data }) {
+  const [hours, setHours] = useState(24)
+  const [history, setHistory] = useState([])
+
+  useEffect(() => {
+    api.history(hours).then(d => setHistory(d.points ?? [])).catch(() => setHistory([]))
+  }, [hours])
+
   if (!data) return <div style={{ padding: '3rem', textAlign: 'center', fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--muted)' }}>no Veeam data</div>
   return (
     <div>
@@ -10,6 +41,38 @@ export default function VeeamView({ data }) {
         <div className="metric"><div className="metric-label">warnings</div><div className="metric-val" style={{ color: data.warning_jobs > 0 ? 'var(--c-warn)' : undefined }}>{data.warning_jobs}</div></div>
         <div className="metric"><div className="metric-label">repo used</div><div className="metric-val">{data.repo_util_pct}%</div><div className="metric-sub">{Math.round(data.total_repo_used_gb/1024)} / {Math.round(data.total_repo_capacity_gb/1024)} TB</div></div>
       </div>
+
+      <div className="card" style={{ marginBottom: '1rem' }}>
+        <div className="card-header">
+          <div className="card-title"><i className="ti ti-chart-line" style={{ color: 'var(--c-blue)' }} aria-hidden="true" />Trends</div>
+          <div style={{ display: 'flex', gap: 4 }}>
+            {RANGES.map(r => (
+              <button
+                key={r.hours}
+                onClick={() => setHours(r.hours)}
+                style={{
+                  fontSize: 11, fontFamily: 'var(--mono)', padding: '2px 8px',
+                  borderRadius: 4, border: '0.5px solid var(--border)',
+                  background: hours === r.hours ? 'var(--c-blue)' : 'transparent',
+                  color: hours === r.hours ? '#fff' : 'var(--muted)',
+                  cursor: 'pointer',
+                }}
+              >{r.label}</button>
+            ))}
+          </div>
+        </div>
+        <div className="card-body">
+          {history.length < 2
+            ? <div style={{ fontSize: 12, color: 'var(--muted)', fontFamily: 'var(--mono)' }}>no history yet — snapshots collect every 15 min</div>
+            : <>
+                <TrendRow label="failed jobs" data={history.map(p => p.veeam_failed)} color="var(--c-crit)" />
+                <TrendRow label="repo utilisation %" data={history.map(p => p.veeam_repo_pct)} color="var(--c-blue)" unit="%" />
+                <TrendRow label="protected VMs" data={history.map(p => p.veeam_protected)} color="var(--c-green)" />
+              </>
+          }
+        </div>
+      </div>
+
       <div className="card" style={{ marginBottom: '1rem' }}>
         <div className="card-header"><div className="card-title"><i className="ti ti-cloud-upload" style={{ color: 'var(--c-blue)' }} aria-hidden="true" />Backup jobs</div></div>
         <div className="tbl-wrap">
@@ -31,6 +94,7 @@ export default function VeeamView({ data }) {
           </table>
         </div>
       </div>
+
       <div className="card">
         <div className="card-header"><div className="card-title"><i className="ti ti-server" style={{ color: 'var(--c-blue)' }} aria-hidden="true" />Repositories</div></div>
         <div className="tbl-wrap">

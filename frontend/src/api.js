@@ -63,5 +63,6 @@ export const api = {
     const q = new URLSearchParams(params).toString()
     return apiFetch(`/api/vcenter/surges${q ? '?' + q : ''}`)
   },
+  history:  (hours = 24) => apiFetch(`/api/history?hours=${hours}`),
 }
 

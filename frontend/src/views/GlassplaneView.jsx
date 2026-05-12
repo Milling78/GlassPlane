@@ -1,4 +1,5 @@
 import React from 'react'
+import Sparkline from '../components/Sparkline'
 
 function StatusDot({ status }) {
   const cls = { ok: 'dot-ok', warning: 'dot-warn', critical: 'dot-crit' }
@@ -36,7 +37,7 @@ function ScoreRing({ score }) {
   )
 }
 
-export default function GlassplaneView({ data, onNavigate }) {
+export default function GlassplaneView({ data, history = [], onNavigate }) {
   if (!data) return null
   const { vcenter, aruba, alletra, veeam, optimization_score, top_recommendations, overall_status } = data
 
@@ -104,13 +105,27 @@ export default function GlassplaneView({ data, onNavigate }) {
                     <div className="metric"><div className="metric-label">wasted RAM</div><div className="metric-val">{Math.round(vcenter.wasted_ram_gb)}GB</div></div>
                   </div>
                   {vcenter.clusters?.map(c => <BarRow key={c.name} label={`${c.name} CPU`} pct={c.cpu_util_pct} />)}
+                  {history.length > 1 && (
+                    <div style={{ marginTop: 10 }}>
+                      <div style={{ fontSize: 10, color: 'var(--muted)', fontFamily: 'var(--mono)', marginBottom: 2 }}>idle VMs · 24h</div>
+                      <Sparkline data={history.map(p => p.vc_idle)} color="var(--c-warn)" height={28} />
+                    </div>
+                  )}
                 </>
               )}
               {s.id === 'aruba' && aruba && (
-                <div className="metrics">
-                  <div className="metric"><div className="metric-label">switches</div><div className="metric-val">{aruba.switch_count}</div></div>
-                  <div className="metric"><div className="metric-label">unused ports</div><div className="metric-val">{aruba.unused_ports}</div><div className="metric-sub">{aruba.unused_port_pct}%</div></div>
-                </div>
+                <>
+                  <div className="metrics" style={{ marginBottom: history.length > 1 ? 10 : 0 }}>
+                    <div className="metric"><div className="metric-label">switches</div><div className="metric-val">{aruba.switch_count}</div></div>
+                    <div className="metric"><div className="metric-label">unused ports</div><div className="metric-val">{aruba.unused_ports}</div><div className="metric-sub">{aruba.unused_port_pct}%</div></div>
+                  </div>
+                  {history.length > 1 && (
+                    <div>
+                      <div style={{ fontSize: 10, color: 'var(--muted)', fontFamily: 'var(--mono)', marginBottom: 2 }}>unused port % · 24h</div>
+                      <Sparkline data={history.map(p => p.ar_unused_pct)} color="var(--c-blue)" height={28} />
+                    </div>
+                  )}
+                </>
               )}
               {s.id === 'alletra' && alletra && (
                 <>
@@ -119,14 +134,28 @@ export default function GlassplaneView({ data, onNavigate }) {
                     <div className="metric"><div className="metric-label">efficiency</div><div className="metric-val">{alletra.total_efficiency_ratio?.toFixed(1)}:1</div></div>
                   </div>
                   <BarRow label="capacity" pct={alletra.util_pct} />
+                  {history.length > 1 && (
+                    <div style={{ marginTop: 10 }}>
+                      <div style={{ fontSize: 10, color: 'var(--muted)', fontFamily: 'var(--mono)', marginBottom: 2 }}>utilisation % · 24h</div>
+                      <Sparkline data={history.map(p => p.al_util_pct)} color="var(--c-blue)" height={28} />
+                    </div>
+                  )}
                 </>
               )}
               {s.id === 'veeam' && veeam && (
-                <div className="metrics">
-                  <div className="metric"><div className="metric-label">failed jobs</div><div className="metric-val" style={{ color: veeam.failed_jobs > 0 ? 'var(--c-crit)' : undefined }}>{veeam.failed_jobs}</div></div>
-                  <div className="metric"><div className="metric-label">protected VMs</div><div className="metric-val">{veeam.protected_vms}</div></div>
-                  <div className="metric"><div className="metric-label">repo used</div><div className="metric-val">{veeam.repo_util_pct}%</div></div>
-                </div>
+                <>
+                  <div className="metrics" style={{ marginBottom: history.length > 1 ? 10 : 0 }}>
+                    <div className="metric"><div className="metric-label">failed jobs</div><div className="metric-val" style={{ color: veeam.failed_jobs > 0 ? 'var(--c-crit)' : undefined }}>{veeam.failed_jobs}</div></div>
+                    <div className="metric"><div className="metric-label">protected VMs</div><div className="metric-val">{veeam.protected_vms}</div></div>
+                    <div className="metric"><div className="metric-label">repo used</div><div className="metric-val">{veeam.repo_util_pct}%</div></div>
+                  </div>
+                  {history.length > 1 && (
+                    <div>
+                      <div style={{ fontSize: 10, color: 'var(--muted)', fontFamily: 'var(--mono)', marginBottom: 2 }}>repo util % · 24h</div>
+                      <Sparkline data={history.map(p => p.veeam_repo_pct)} color="var(--c-blue)" height={28} />
+                    </div>
+                  )}
+                </>
               )}
             </div>
           </div>

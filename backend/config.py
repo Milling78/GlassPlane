@@ -60,6 +60,11 @@ class Settings(BaseSettings):
     alert_veeam_unprotected_vms: int = 1
     alert_veeam_repo_util_pct: float = 80.0
 
+    # Historical snapshots
+    snapshot_interval_seconds: int = 900   # 15 minutes
+    snapshot_retention_days: int = 30
+    db_path: str = "glassplane.db"
+
 
 @lru_cache
 def get_settings() -> Settings:

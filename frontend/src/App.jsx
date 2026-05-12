@@ -30,6 +30,7 @@ export default function App() {
   const [apiKey, setApiKey] = useState(() => auth.getKey())
   const [view, setView] = useState('summary')
   const [summary, setSummary] = useState(null)
+  const [history, setHistory] = useState([])
   const [loading, setLoading] = useState(true)
   const [lastRefresh, setLastRefresh] = useState(null)
   const [error, setError] = useState(null)
@@ -73,12 +74,28 @@ export default function App() {
     }
   }, [ready])
 
+  const refreshHistory = useCallback(async () => {
+    if (!ready) return
+    try {
+      const d = await api.history(24)
+      setHistory(d.points ?? [])
+    } catch {
+      // history is best-effort
+    }
+  }, [ready])
+
   useEffect(() => { refresh() }, [refresh])
+  useEffect(() => { refreshHistory() }, [refreshHistory])
   useEffect(() => {
     if (!ready) return
     const t = setInterval(refresh, 60_000)
     return () => clearInterval(t)
   }, [refresh, ready])
+  useEffect(() => {
+    if (!ready) return
+    const t = setInterval(refreshHistory, 900_000) // 15 min
+    return () => clearInterval(t)
+  }, [refreshHistory, ready])
 
   // ── Gates (all hooks above this line) ─────────────────────────────────────
 
@@ -181,7 +198,7 @@ export default function App() {
                 connecting to backend…
               </div>
             : <>
-                {view === 'summary'  && <GlassplaneView data={summary} onNavigate={setView} />}
+                {view === 'summary'  && <GlassplaneView data={summary} history={history} onNavigate={setView} />}
                 {view === 'vms'      && <VMsView vcenter={summary?.vcenter} />}
                 {view === 'surges'   && <SurgeView />}
                 {view === 'aruba'    && <ArubaView data={summary?.aruba} />}
