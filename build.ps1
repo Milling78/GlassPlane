@@ -4,10 +4,14 @@
     Infra Glassplane — full Windows build pipeline.
 
 .DESCRIPTION
-    1. Generates icon assets (requires Pillow)
+    0. Installs all Python and Node dependencies
+    1. Generates icon assets
     2. Compiles the FastAPI backend to a standalone .exe via PyInstaller
     3. Builds the React frontend via Vite
     4. Packages everything into a Windows NSIS installer via electron-builder
+
+.PARAMETER SkipDeps
+    Skip dependency installation (pip install / npm ci).
 
 .PARAMETER SkipBackend
     Skip the PyInstaller step (reuse an existing backend binary).
@@ -24,9 +28,11 @@
 .EXAMPLE
     .\build.ps1
     .\build.ps1 -SkipBackend -SkipFrontend
+    .\build.ps1 -SkipDeps -SkipBackend
     .\build.ps1 -Publish
 #>
 param(
+    [switch]$SkipDeps,
     [switch]$SkipBackend,
     [switch]$SkipFrontend,
     [switch]$SkipIcons,
@@ -60,23 +66,50 @@ Write-Host "==========================================" -ForegroundColor Blue
 Write-Host "  Infra Glassplane — Windows build" -ForegroundColor Blue
 Write-Host "==========================================" -ForegroundColor Blue
 
-# ── 0. Pre-flight ─────────────────────────────────────────────────────────────
+# ── Pre-flight checks ─────────────────────────────────────────────────────────
 
 Assert-Command 'python'  'Install Python 3.11+ from python.org'
 Assert-Command 'node'    'Install Node.js 20+ from nodejs.org'
 Assert-Command 'npm'     'Install Node.js 20+ from nodejs.org'
+
+# ── 0. Dependencies ───────────────────────────────────────────────────────────
+
+if (-not $SkipDeps) {
+    Write-Step 'Step 0/4 — Installing all dependencies'
+
+    # Python: build tools + backend packages
+    Write-Host '  pip install: build tools (PyInstaller, Pillow)...'
+    python -m pip install pyinstaller pillow --quiet --upgrade
+    if ($LASTEXITCODE -ne 0) { Write-Host '  pip install (tools) failed.' -ForegroundColor Red; exit 1 }
+
+    Write-Host '  pip install: backend packages...'
+    python -m pip install -r (Join-Path $BackendDir 'requirements.txt') --quiet --upgrade
+    if ($LASTEXITCODE -ne 0) { Write-Host '  pip install (backend) failed.' -ForegroundColor Red; exit 1 }
+
+    # Node: root workspace
+    Write-Host '  npm ci (root)...'
+    Push-Location $Root
+    npm ci --silent
+    if ($LASTEXITCODE -ne 0) { Write-Host '  npm ci (root) failed.' -ForegroundColor Red; exit 1 }
+    Pop-Location
+
+    # Node: frontend
+    Write-Host '  npm ci (frontend)...'
+    Push-Location $FrontDir
+    npm ci --silent
+    if ($LASTEXITCODE -ne 0) { Write-Host '  npm ci (frontend) failed.' -ForegroundColor Red; exit 1 }
+    Pop-Location
+
+    Write-Host '  OK — all dependencies installed.' -ForegroundColor Green
+} else {
+    Write-Step 'Step 0/4 — Skipping dependency install (-SkipDeps)'
+}
 
 # ── 1. Icons ──────────────────────────────────────────────────────────────────
 
 if (-not $SkipIcons) {
     Write-Step 'Step 1/4 — Generating icon assets'
     $iconScript = Join-Path $ScriptsDir 'make-icon.py'
-
-    $pillowOk = python -c "import PIL" 2>$null
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host '  Installing Pillow for icon generation...'
-        python -m pip install Pillow --quiet
-    }
 
     python $iconScript
     if ($LASTEXITCODE -ne 0) { Write-Host '  Icon generation failed.' -ForegroundColor Red; exit 1 }
@@ -98,15 +131,6 @@ if (-not $SkipIcons) {
 if (-not $SkipBackend) {
     Write-Step 'Step 2/4 — Compiling FastAPI backend (PyInstaller)'
     Push-Location $BackendDir
-
-    $pyiOk = python -c "import PyInstaller" 2>$null
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host '  Installing PyInstaller...'
-        python -m pip install pyinstaller --quiet
-    }
-
-    Write-Host '  Installing backend dependencies...'
-    python -m pip install -r requirements.txt --quiet
 
     Write-Host '  Running PyInstaller...'
     python -m PyInstaller glassplane-backend.spec `
@@ -136,11 +160,6 @@ if (-not $SkipFrontend) {
     Write-Step 'Step 3/4 — Building React frontend (Vite)'
     Push-Location $FrontDir
 
-    if (-not (Test-Path 'node_modules')) {
-        Write-Host '  npm install...'
-        npm install --silent
-    }
-
     npm run build
     if ($LASTEXITCODE -ne 0) { Write-Host '  Vite build failed.' -ForegroundColor Red; exit 1 }
 
@@ -155,10 +174,9 @@ if (-not $SkipFrontend) {
 Write-Step 'Step 4/4 — Packaging with electron-builder (NSIS)'
 Push-Location $Root
 
-if (-not (Test-Path 'node_modules')) {
-    Write-Host '  npm install (root)...'
-    npm install --silent
-}
+# Disable code-signing lookup so electron-builder does not require
+# winCodeSign symlink extraction (needs Developer Mode or Admin on Windows)
+$env:CSC_IDENTITY_AUTO_DISCOVERY = 'false'
 
 if ($Publish) {
     Write-Host '  Publishing to GitHub Releases...'
