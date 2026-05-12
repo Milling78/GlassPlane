@@ -19,6 +19,8 @@ from models.schemas import (
 from connectors.vcenter import fetch_vcenter_summary, fetch_vcenter_hosts, fetch_vm_snapshots
 from connectors.alletra import fetch_alletra_summary
 from connectors.veeam import fetch_veeam_summary
+from connectors.vcenter_perf import fetch_vm_surges, VMSurgeResult
+from models.surge_schemas import SurgeSummarySchema, VMSurgeResultSchema, SurgeEventSchema, SurgePeriodSchema
 
 logger = logging.getLogger(__name__)
 

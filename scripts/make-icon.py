@@ -88,12 +88,12 @@ def main():
         sizes=[(s, s) for s in SIZES],
         append_images=frames[:-1],
     )
-    print(f'  icon.ico  → {ico_path}')
+    print(f'  icon.ico  -> {ico_path}')
 
     # --- PNG for Linux AppImage ---
     png_path = os.path.join(OUT_DIR, 'icon.png')
     frames[-1].save(png_path, format='PNG')
-    print(f'  icon.png  → {png_path}')
+    print(f'  icon.png  -> {png_path}')
 
     print('Done.')
 
