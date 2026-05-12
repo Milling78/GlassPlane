@@ -39,7 +39,7 @@ export default function LoginView({ onLogin }) {
             Infra Glassplane
           </div>
           <div style={{ fontSize: 12, color: 'var(--muted)', fontFamily: 'var(--mono)' }}>
-            Enter your API key to connect
+            Enter your Glassplane API key to connect to the local backend service
           </div>
         </div>
 
