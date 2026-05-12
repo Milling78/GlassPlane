@@ -1,0 +1,86 @@
+{
+  "name": "infra-glassplane",
+  "version": "1.0.0",
+  "description": "Infrastructure Glassplane — unified resource optimisation dashboard",
+  "main": "electron/main.js",
+  "scripts": {
+    "start":      "electron .",
+    "dev":        "concurrently \"npm run dev:frontend\" \"wait-on http://localhost:5173 && electron .\"",
+    "dev:frontend": "cd frontend && npm run dev",
+    "build":      "bash build.sh",
+    "dist":       "electron-builder",
+    "dist:win":   "electron-builder --win",
+    "dist:mac":   "electron-builder --mac",
+    "dist:linux": "electron-builder --linux"
+  },
+  "keywords": ["infrastructure", "dashboard", "vmware", "veeam", "hpe", "aruba"],
+  "author": "Your Org",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently":    "^8.2.2",
+    "electron":        "^30.0.0",
+    "electron-builder": "^24.13.0",
+    "wait-on":         "^7.2.0"
+  },
+  "build": {
+    "appId":       "com.yourorg.infra-glassplane",
+    "productName": "Infra Glassplane",
+    "copyright":   "Copyright © 2025 Your Org",
+    "directories": {
+      "output": "dist-electron",
+      "buildResources": "build-resources"
+    },
+    "files": [
+      "electron/**/*",
+      "frontend/dist/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "backend/dist/glassplane-backend",
+        "to":   "backend/glassplane-backend",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "backend/.env.example",
+        "to":   "backend/.env.example"
+      }
+    ],
+    "win": {
+      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "icon": "build-resources/icon.ico",
+      "extraResources": [
+        {
+          "from": "backend/dist/glassplane-backend.exe",
+          "to":   "backend/glassplane-backend.exe"
+        }
+      ]
+    },
+    "mac": {
+      "target":   [{ "target": "dmg", "arch": ["x64", "arm64"] }],
+      "icon":     "build-resources/icon.icns",
+      "category": "public.app-category.utilities",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false
+    },
+    "linux": {
+      "target": [{ "target": "AppImage", "arch": ["x64"] }],
+      "icon":   "build-resources/icon.png",
+      "category": "Utility"
+    },
+    "nsis": {
+      "oneClick":           false,
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon":      "build-resources/icon.ico",
+      "uninstallerIcon":    "build-resources/icon.ico",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "dmg": {
+      "contents": [
+        { "x": 410, "y": 150, "type": "link", "path": "/Applications" },
+        { "x": 130, "y": 150, "type": "file" }
+      ]
+    }
+  }
+}
