@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { api } from '../api'
+import ReportModal from '../components/ReportModal'
 
 function UtilCell({ pct, off }) {
   const barCls = off ? 'bar-off' : pct > 85 ? 'bar-crit' : pct > 70 ? 'bar-warn' : 'bar-ok'
@@ -55,16 +56,17 @@ function exportCSV(vms) {
 }
 
 const COLS = [
-  { key: 'name',             label: 'VM name',    w: '18%' },
-  { key: 'cluster',          label: 'cluster',    w: '11%' },
-  { key: 'host',             label: 'host',       w: '13%' },
+  { key: '_sel',             label: '',           w: '3%'  },
+  { key: 'name',             label: 'VM name',    w: '17%' },
+  { key: 'cluster',          label: 'cluster',    w: '10%' },
+  { key: 'host',             label: 'host',       w: '12%' },
   { key: 'power_state',      label: 'state',      w: '6%'  },
-  { key: 'cpu_util_pct',     label: 'CPU %',      w: '10%' },
-  { key: 'ram_util_pct',     label: 'RAM %',      w: '10%' },
+  { key: 'cpu_util_pct',     label: 'CPU %',      w: '9%'  },
+  { key: 'ram_util_pct',     label: 'RAM %',      w: '9%'  },
   { key: 'cpu_allocated_mhz',label: 'CPU alloc',  w: '9%'  },
   { key: 'ram_allocated_mb', label: 'RAM alloc',  w: '8%'  },
   { key: 'datastore_gb',     label: 'disk GB',    w: '7%'  },
-  { key: 'flags',            label: 'flags',      w: '8%'  },
+  { key: 'flags',            label: 'flags',      w: '10%' },
 ]
 
 // Which flags are active for a given VM
@@ -95,6 +97,8 @@ export default function VMsView({ vcenter }) {
   const [ramMin, setRamMin] = useState(0)
   const [sortKey, setSortKey] = useState('cpu_util_pct')
   const [sortDir, setSortDir] = useState('desc')
+  const [selected, setSelected] = useState(new Set())
+  const [showReport, setShowReport] = useState(false)
 
   useEffect(() => {
     if (vcenter?.vms?.length) { setVms(vcenter.vms); return }
@@ -149,6 +153,27 @@ export default function VMsView({ vcenter }) {
     if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
     else { setSortKey(key); setSortDir('desc') }
   }
+
+  const allFilteredSelected = filtered.length > 0 && filtered.every(v => selected.has(v.vm_id))
+
+  function toggleSelectAll() {
+    setSelected(prev => {
+      const next = new Set(prev)
+      if (allFilteredSelected) filtered.forEach(v => next.delete(v.vm_id))
+      else                     filtered.forEach(v => next.add(v.vm_id))
+      return next
+    })
+  }
+
+  function toggleSelect(id) {
+    setSelected(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
+  const selectedVms = vms.filter(v => selected.has(v.vm_id))
 
   const idleCount      = vms.filter(v => v.is_idle).length
   const oversizedCount = vms.filter(v => v.is_oversized).length
@@ -208,6 +233,15 @@ export default function VMsView({ vcenter }) {
               clear
             </button>
           )}
+          {selected.size > 0 && (
+            <button
+              onClick={() => setShowReport(true)}
+              style={{ fontSize: 12, padding: '3px 12px', background: 'var(--c-blue)', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontFamily: 'var(--mono)' }}
+            >
+              <i className="ti ti-report-analytics" style={{ marginRight: 4 }} aria-hidden="true" />
+              Report ({selected.size})
+            </button>
+          )}
           <button onClick={() => exportCSV(filtered)} style={{ fontSize: 12 }}>
             <i className="ti ti-download" style={{ marginRight: 4 }} aria-hidden="true" />export CSV
           </button>
@@ -221,7 +255,12 @@ export default function VMsView({ vcenter }) {
             <colgroup>{COLS.map(c => <col key={c.key} style={{ width: c.w }} />)}</colgroup>
             <thead>
               <tr>
-                {COLS.map(c => (
+                <th style={{ width: '3%', padding: '6px 8px' }}>
+                  <input type="checkbox" checked={allFilteredSelected} onChange={toggleSelectAll}
+                    title={allFilteredSelected ? 'Deselect all' : 'Select all filtered'}
+                    style={{ cursor: 'pointer' }} />
+                </th>
+                {COLS.filter(c => c.key !== '_sel').map(c => (
                   <th key={c.key} onClick={() => toggleSort(c.key)}
                     style={{ cursor: 'pointer', color: sortKey === c.key ? 'var(--c-blue)' : undefined }}>
                     {c.label}
@@ -234,11 +273,15 @@ export default function VMsView({ vcenter }) {
             </thead>
             <tbody>
               {filtered.length === 0
-                ? <tr><td colSpan={10} style={{ textAlign: 'center', padding: '2rem', color: 'var(--muted)', fontFamily: 'var(--mono)' }}>no VMs match filters</td></tr>
+                ? <tr><td colSpan={11} style={{ textAlign: 'center', padding: '2rem', color: 'var(--muted)', fontFamily: 'var(--mono)' }}>no VMs match filters</td></tr>
                 : filtered.map(vm => {
                   const off = vm.power_state !== 'poweredOn'
+                  const isSel = selected.has(vm.vm_id)
                   return (
-                    <tr key={vm.vm_id}>
+                    <tr key={vm.vm_id} style={{ background: isSel ? 'color-mix(in srgb, var(--c-blue) 8%, transparent)' : undefined }}>
+                      <td style={{ padding: '6px 8px' }}>
+                        <input type="checkbox" checked={isSel} onChange={() => toggleSelect(vm.vm_id)} style={{ cursor: 'pointer' }} />
+                      </td>
                       <td title={vm.name} style={{ fontWeight: 500 }}>{vm.name}</td>
                       <td>{vm.cluster}</td>
                       <td style={{ fontSize: 11, color: 'var(--muted)' }}>{vm.host}</td>
@@ -265,5 +308,9 @@ export default function VMsView({ vcenter }) {
         </div>
       </div>
     </div>
+
+    {showReport && (
+      <ReportModal vms={selectedVms} onClose={() => setShowReport(false)} />
+    )}
   )
 }
