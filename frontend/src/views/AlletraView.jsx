@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { api } from '../api'
 import Sparkline from '../components/Sparkline'
+import VolumeDetailModal from '../components/VolumeDetailModal'
 
 const RANGES = [
   { label: '24h', hours: 24 },
@@ -25,6 +26,7 @@ function TrendRow({ label, data, color, unit = '' }) {
 export default function AlletraView({ data }) {
   const [hours, setHours] = useState(24)
   const [history, setHistory] = useState([])
+  const [selectedVolume, setSelectedVolume] = useState(null)
 
   useEffect(() => {
     api.history(hours).then(d => setHistory(d.points ?? [])).catch(() => setHistory([]))
@@ -72,26 +74,58 @@ export default function AlletraView({ data }) {
       </div>
 
       <div className="card">
-        <div className="card-header"><div className="card-title"><i className="ti ti-database" style={{ color: 'var(--c-blue)' }} aria-hidden="true" />Volumes</div></div>
+        <div className="card-header">
+          <div className="card-title"><i className="ti ti-database" style={{ color: 'var(--c-blue)' }} aria-hidden="true" />Volumes</div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'var(--mono)' }}>click row to drill down</div>
+        </div>
         <div className="tbl-wrap">
           <table style={{ tableLayout: 'auto' }}>
-            <thead><tr><th>Name</th><th>Provisioned</th><th>Used</th><th>Util %</th><th>Dedup</th><th>Compress</th><th>Thin</th></tr></thead>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Provisioned</th>
+                <th>Used</th>
+                <th>Util %</th>
+                <th>Dedup</th>
+                <th>Compress</th>
+                <th>Savings</th>
+                <th>Type</th>
+                <th>Host</th>
+              </tr>
+            </thead>
             <tbody>
               {(data.volumes ?? []).map(v => (
-                <tr key={v.volume_id}>
+                <tr
+                  key={v.volume_id}
+                  onClick={() => setSelectedVolume(v)}
+                  style={{ cursor: 'pointer' }}
+                >
                   <td style={{ fontWeight: 500 }}>{v.name}</td>
-                  <td>{v.provisioned_gb >= 1024 ? (v.provisioned_gb/1024).toFixed(1)+'TB' : v.provisioned_gb+'GB'}</td>
-                  <td>{v.used_gb >= 1024 ? (v.used_gb/1024).toFixed(1)+'TB' : v.used_gb+'GB'}</td>
+                  <td>{v.provisioned_gb >= 1024 ? (v.provisioned_gb/1024).toFixed(1)+' TB' : v.provisioned_gb+' GB'}</td>
+                  <td>{v.used_gb >= 1024 ? (v.used_gb/1024).toFixed(1)+' TB' : v.used_gb.toFixed(1)+' GB'}</td>
                   <td style={{ color: v.util_pct > 85 ? 'var(--c-crit)' : v.util_pct > 70 ? 'var(--c-warn)' : undefined }}>{v.util_pct}%</td>
-                  <td>{v.dedup_ratio?.toFixed(1)}:1</td>
-                  <td>{v.compress_ratio?.toFixed(1)}:1</td>
-                  <td>{v.is_thin ? 'yes' : 'no'}</td>
+                  <td>{v.dedup_ratio?.toFixed(2)}:1</td>
+                  <td>{v.compress_ratio?.toFixed(2)}:1</td>
+                  <td style={{ color: 'var(--c-green)' }}>{v.total_savings_pct?.toFixed(1)}%</td>
+                  <td>
+                    <span style={{ fontSize: 10, fontFamily: 'var(--mono)', fontWeight: 600, padding: '1px 6px', borderRadius: 3, background: v.is_thin ? '#dbeafe' : '#f3f4f6', color: v.is_thin ? '#1e40af' : '#374151' }}>
+                      {v.is_thin ? 'thin' : 'thick'}
+                    </span>
+                  </td>
+                  <td style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'var(--mono)' }}>{v.host_mapped ?? '—'}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       </div>
+
+      {selectedVolume && (
+        <VolumeDetailModal
+          volume={selectedVolume}
+          onClose={() => setSelectedVolume(null)}
+        />
+      )}
     </div>
   )
 }
