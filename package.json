@@ -51,6 +51,8 @@
     "win": {
       "target": [{ "target": "nsis", "arch": ["x64"] }],
       "icon": "build-resources/icon.ico",
+      "sign": null,
+      "signingHashAlgorithms": null,
       "extraResources": [
         {
           "from": "backend/dist/glassplane-backend.exe",

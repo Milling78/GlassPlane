@@ -183,6 +183,7 @@ export default function VMsView({ vcenter }) {
   if (loading) return <div style={{ padding: '3rem', textAlign: 'center', fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--muted)' }}>loading VMs…</div>
 
   return (
+    <>
     <div>
       {/* Stats — clickable to set quick filters */}
       <div className="metrics" style={{ marginBottom: '1rem' }}>
@@ -312,5 +313,6 @@ export default function VMsView({ vcenter }) {
     {showReport && (
       <ReportModal vms={selectedVms} onClose={() => setShowReport(false)} />
     )}
+    </>
   )
 }
