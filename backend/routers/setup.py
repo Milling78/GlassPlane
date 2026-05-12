@@ -4,13 +4,57 @@ import socket
 import ssl
 
 import httpx
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from config import get_settings
+from security import verify_api_key
 
 logger = logging.getLogger(__name__)
 setup_router = APIRouter(prefix="/setup", tags=["Setup"])
+
+
+@setup_router.get("/config", dependencies=[Depends(verify_api_key)])
+def get_config():
+    s = get_settings()
+    return {
+        "apiKey":           s.api_key,
+        "allowedOrigins":   s.allowed_origins,
+        "vcenter": {
+            "host":      s.vcenter_host,
+            "user":      s.vcenter_user,
+            "password":  s.vcenter_password,
+            "port":      s.vcenter_port,
+            "sslVerify": s.vcenter_ssl_verify,
+        },
+        "aruba": {
+            "baseUrl":      s.aruba_central_base_url,
+            "clientId":     s.aruba_client_id,
+            "clientSecret": s.aruba_client_secret,
+            "customerId":   s.aruba_customer_id,
+            "accessToken":  s.aruba_access_token,
+        },
+        "alletra": {
+            "host":     s.alletra_host,
+            "user":     s.alletra_user,
+            "password": s.alletra_password,
+            "port":     s.alletra_port,
+        },
+        "veeam": {
+            "host":     s.veeam_host,
+            "user":     s.veeam_user,
+            "password": s.veeam_password,
+            "port":     s.veeam_port,
+        },
+        "cacheTtl":  s.cache_ttl_seconds,
+        "logLevel":  s.log_level,
+    }
+
+
+@setup_router.post("/reload", dependencies=[Depends(verify_api_key)])
+def reload_config():
+    get_settings.cache_clear()
+    return {"ok": True, "message": "Configuration reloaded — new settings are active"}
 
 
 @setup_router.get("/status")

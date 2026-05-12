@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { getBaseUrl } from '../api'
+import { buildEnvContent } from '../utils/env'
 
 const STEPS = ['Welcome', 'Security', 'vCenter', 'Aruba', 'Alletra', 'Veeam', 'Save']
 
@@ -17,43 +18,6 @@ function generateKey() {
   return Array.from(arr).map(b => b.toString(16).padStart(2, '0')).join('')
 }
 
-function buildEnvContent(cfg) {
-  return [
-    '# ── vCenter ──────────────────────────────────────────────',
-    `VCENTER_HOST=${cfg.vcenter.host}`,
-    `VCENTER_USER=${cfg.vcenter.user}`,
-    `VCENTER_PASSWORD=${cfg.vcenter.password}`,
-    `VCENTER_PORT=${cfg.vcenter.port}`,
-    `VCENTER_SSL_VERIFY=${cfg.vcenter.sslVerify}`,
-    '',
-    '# ── Aruba Central ─────────────────────────────────────────',
-    `ARUBA_CENTRAL_BASE_URL=${cfg.aruba.baseUrl}`,
-    `ARUBA_CLIENT_ID=${cfg.aruba.clientId}`,
-    `ARUBA_CLIENT_SECRET=${cfg.aruba.clientSecret}`,
-    `ARUBA_CUSTOMER_ID=${cfg.aruba.customerId}`,
-    `ARUBA_ACCESS_TOKEN=${cfg.aruba.accessToken}`,
-    '',
-    '# ── HPE Alletra 6000 ─────────────────────────────────────',
-    `ALLETRA_HOST=${cfg.alletra.host}`,
-    `ALLETRA_USER=${cfg.alletra.user}`,
-    `ALLETRA_PASSWORD=${cfg.alletra.password}`,
-    `ALLETRA_PORT=${cfg.alletra.port}`,
-    '',
-    '# ── Veeam Backup & Replication ────────────────────────────',
-    `VEEAM_HOST=${cfg.veeam.host}`,
-    `VEEAM_USER=${cfg.veeam.user}`,
-    `VEEAM_PASSWORD=${cfg.veeam.password}`,
-    `VEEAM_PORT=${cfg.veeam.port}`,
-    '',
-    '# ── App ───────────────────────────────────────────────────',
-    'CACHE_TTL_SECONDS=60',
-    'LOG_LEVEL=INFO',
-    '',
-    '# ── Auth ──────────────────────────────────────────────────',
-    `API_KEY=${cfg.apiKey}`,
-    'ALLOWED_ORIGINS=*',
-  ].join('\n')
-}
 
 // ── Shared field components ───────────────────────────────────────────────────
 
