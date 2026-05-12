@@ -45,6 +45,9 @@ build-resources/icon.ico
 build-resources/icon.png
 build-resources/icon.icns
 
+# Accidental nested clone
+GlassPlane/
+
 # SQLite history database
 *.db
 
