@@ -76,8 +76,9 @@ def write(db_path: str, row: dict) -> None:
 def prune(db_path: str, retention_days: int) -> None:
     cutoff = time.time() - retention_days * 86400
     with _lock:
-        _open(db_path).execute("DELETE FROM snapshots WHERE ts < ?", (cutoff,))
-        _conn.commit()
+        conn = _open(db_path)
+        conn.execute("DELETE FROM snapshots WHERE ts < ?", (cutoff,))
+        conn.commit()
 
 
 def read(db_path: str, hours: float) -> list[dict]:

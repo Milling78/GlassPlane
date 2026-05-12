@@ -95,7 +95,13 @@ def get_vms(
     """
     from models.schemas import VMSummary
     try:
-        summary = fetch_vcenter_summary()
+        now = time()
+        cached_vc = _cache.get("vcenter")
+        if cached_vc and (now - cached_vc[0]) < get_settings().cache_ttl_seconds:
+            summary = cached_vc[1]
+        else:
+            summary = fetch_vcenter_summary()
+            _cache["vcenter"] = (now, summary)
     except Exception as e:
         logger.error(f"vCenter error: {e}", exc_info=True)
         raise HTTPException(status_code=502, detail=str(e))

@@ -10,8 +10,8 @@ contextBridge.exposeInMainWorld('glassplane', {
   getAppVersion:    ()        => ipcRenderer.invoke('get-app-version'),
   checkForUpdates:  ()        => ipcRenderer.invoke('check-for-updates'),
   installUpdate:    ()        => ipcRenderer.invoke('install-update'),
-  onUpdateStatus:   (cb)      => ipcRenderer.on('update-status', (_, data) => cb(data)),
-  offUpdateStatus:  (cb)      => ipcRenderer.removeListener('update-status', cb),
+  onUpdateStatus:   (cb)      => { const w = (_, d) => cb(d); ipcRenderer.on('update-status', w); return w },
+  offUpdateStatus:  (wrapped) => ipcRenderer.removeListener('update-status', wrapped),
   platform: process.platform,
   isElectron: true,
 })

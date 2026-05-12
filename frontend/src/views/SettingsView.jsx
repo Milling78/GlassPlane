@@ -226,9 +226,8 @@ export default function SettingsView() {
 
   useEffect(() => {
     if (!window.glassplane?.onUpdateStatus) return
-    const handler = (data) => setUpdateStatus(data)
-    window.glassplane.onUpdateStatus(handler)
-    return () => window.glassplane.offUpdateStatus?.(handler)
+    const wrapped = window.glassplane.onUpdateStatus((data) => setUpdateStatus(data))
+    return () => window.glassplane.offUpdateStatus?.(wrapped)
   }, [])
 
   async function sendTestWebhook() {

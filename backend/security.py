@@ -1,3 +1,5 @@
+import secrets
+
 from fastapi import HTTPException, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from config import get_settings
@@ -11,5 +13,5 @@ async def verify_api_key(
     settings = get_settings()
     if not settings.api_key:
         return  # auth disabled — open access
-    if not credentials or credentials.credentials != settings.api_key:
+    if not credentials or not secrets.compare_digest(credentials.credentials, settings.api_key):
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
