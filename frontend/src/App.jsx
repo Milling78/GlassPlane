@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { api } from './api'
+import { api, auth } from './api'
+import LoginView from './views/LoginView'
 import GlassplaneView from './views/GlassplaneView'
 import VMsView from './views/VMsView'
 import ArubaView from './views/ArubaView'
@@ -24,11 +25,25 @@ function StatusDot({ status }) {
 }
 
 export default function App() {
+  const [apiKey, setApiKey] = useState(() => auth.getKey())
   const [view, setView] = useState('summary')
   const [summary, setSummary] = useState(null)
   const [loading, setLoading] = useState(true)
   const [lastRefresh, setLastRefresh] = useState(null)
   const [error, setError] = useState(null)
+
+  useEffect(() => {
+    function onUnauthorized() {
+      auth.clearKey()
+      setApiKey('')
+    }
+    window.addEventListener('glassplane:unauthorized', onUnauthorized)
+    return () => window.removeEventListener('glassplane:unauthorized', onUnauthorized)
+  }, [])
+
+  if (!apiKey) {
+    return <LoginView onLogin={key => setApiKey(key)} />
+  }
 
   const refresh = useCallback(async () => {
     try {
@@ -104,6 +119,15 @@ export default function App() {
             <i className="ti ti-refresh" aria-hidden="true" />
             Refresh
           </button>
+          {auth.getKey() && (
+            <button
+              className="nav-item"
+              onClick={() => { auth.clearKey(); setApiKey('') }}
+            >
+              <i className="ti ti-logout" aria-hidden="true" />
+              Logout
+            </button>
+          )}
         </nav>
 
         <main className="main-content">

@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     # App
     cache_ttl_seconds: int = 60
     log_level: str = "INFO"
+    api_key: str = ""
+    allowed_origins: str = "*"
 
 
 @lru_cache

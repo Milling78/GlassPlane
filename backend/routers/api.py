@@ -8,7 +8,8 @@ from functools import wraps
 from time import time
 from typing import Callable, Any, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from security import verify_api_key
 
 from config import get_settings
 from models.schemas import (
@@ -46,7 +47,7 @@ def cached(key: str):
 
 # ── vCenter router ────────────────────────────────────────────────────────────
 
-vcenter_router = APIRouter(prefix="/vcenter", tags=["vCenter"])
+vcenter_router = APIRouter(prefix="/vcenter", tags=["vCenter"], dependencies=[Depends(verify_api_key)])
 
 
 @vcenter_router.get("/", response_model=VCenterSummary)
@@ -110,7 +111,7 @@ def get_vms(
 
 # ── Aruba router ──────────────────────────────────────────────────────────────
 
-aruba_router = APIRouter(prefix="/aruba", tags=["Aruba"])
+aruba_router = APIRouter(prefix="/aruba", tags=["Aruba"], dependencies=[Depends(verify_api_key)])
 
 
 @aruba_router.get("/", response_model=ArubaSummary)
@@ -125,7 +126,7 @@ def get_aruba():
 
 # ── Alletra router ────────────────────────────────────────────────────────────
 
-alletra_router = APIRouter(prefix="/alletra", tags=["Alletra 6000"])
+alletra_router = APIRouter(prefix="/alletra", tags=["Alletra 6000"], dependencies=[Depends(verify_api_key)])
 
 
 @alletra_router.get("/", response_model=AlletraSummary)
@@ -140,7 +141,7 @@ def get_alletra():
 
 # ── Veeam router ──────────────────────────────────────────────────────────────
 
-veeam_router = APIRouter(prefix="/veeam", tags=["Veeam"])
+veeam_router = APIRouter(prefix="/veeam", tags=["Veeam"], dependencies=[Depends(verify_api_key)])
 
 
 @veeam_router.get("/", response_model=VeeamSummary)
@@ -155,7 +156,7 @@ def get_veeam():
 
 # ── Unified glassplane router ─────────────────────────────────────────────────
 
-glassplane_router = APIRouter(prefix="/summary", tags=["Glassplane"])
+glassplane_router = APIRouter(prefix="/summary", tags=["Glassplane"], dependencies=[Depends(verify_api_key)])
 
 
 def _optimization_score(
@@ -261,7 +262,7 @@ async def get_summary():
 
 # ── Surge detection router ────────────────────────────────────────────────────
 
-surge_router = APIRouter(prefix="/vcenter/surges", tags=["Surge Detection"])
+surge_router = APIRouter(prefix="/vcenter/surges", tags=["Surge Detection"], dependencies=[Depends(verify_api_key)])
 
 
 def _vm_surge_to_schema(r: VMSurgeResult) -> VMSurgeResultSchema:

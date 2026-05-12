@@ -1,5 +1,13 @@
 // Resolves the backend base URL whether running in Electron, browser dev, or browser prod.
 
+const API_KEY_STORAGE = 'glassplane_api_key'
+
+export const auth = {
+  getKey: ()        => localStorage.getItem(API_KEY_STORAGE) ?? '',
+  setKey: (key)     => localStorage.setItem(API_KEY_STORAGE, key),
+  clearKey: ()      => localStorage.removeItem(API_KEY_STORAGE),
+}
+
 let _port = null
 
 export async function getBaseUrl() {
@@ -21,9 +29,22 @@ export async function getBaseUrl() {
   return ''
 }
 
-export async function apiFetch(path) {
+export async function apiFetch(path, options = {}) {
   const base = await getBaseUrl()
-  const res = await fetch(`${base}${path}`, { signal: AbortSignal.timeout(15000) })
+  const key = auth.getKey()
+  const headers = { ...(options.headers ?? {}) }
+  if (key) headers['Authorization'] = `Bearer ${key}`
+
+  const res = await fetch(`${base}${path}`, {
+    ...options,
+    headers,
+    signal: options.signal ?? AbortSignal.timeout(15000),
+  })
+
+  if (res.status === 401) {
+    window.dispatchEvent(new CustomEvent('glassplane:unauthorized'))
+    throw new Error('Unauthorized')
+  }
   if (!res.ok) throw new Error(`HTTP ${res.status} on ${path}`)
   return res.json()
 }
