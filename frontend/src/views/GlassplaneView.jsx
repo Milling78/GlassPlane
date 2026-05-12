@@ -53,7 +53,7 @@ export default function GlassplaneView({ data, history = [], onNavigate }) {
       {/* Score header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 20, marginBottom: '1.5rem' }}>
         <ScoreRing score={optimization_score ?? 0} />
-        <div>
+        <div style={{ flex: 1 }}>
           <div style={{ fontSize: 18, fontWeight: 500 }}>
             {optimization_score > 75 ? 'Optimized' : optimization_score > 50 ? 'Needs attention' : 'Action required'}
           </div>
@@ -62,6 +62,16 @@ export default function GlassplaneView({ data, history = [], onNavigate }) {
             {overall_status} · score {optimization_score}/100
           </div>
         </div>
+        {history.length > 1 && (
+          <div style={{ width: 140 }}>
+            <div style={{ fontSize: 10, color: 'var(--muted)', fontFamily: 'var(--mono)', marginBottom: 3 }}>score · 24h</div>
+            <Sparkline
+              data={history.map(p => p.score)}
+              color={optimization_score > 75 ? 'var(--c-green)' : optimization_score > 50 ? 'var(--c-warn)' : 'var(--c-crit)'}
+              height={36}
+            />
+          </div>
+        )}
       </div>
 
       {/* Recommendations */}

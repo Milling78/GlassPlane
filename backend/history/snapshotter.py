@@ -10,6 +10,7 @@ import time
 
 from config import get_settings
 from history.store import write, prune
+from routers.api import _optimization_score
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,8 @@ def _collect() -> dict:
         "veeam_jobs", "veeam_failed", "veeam_protected", "veeam_unprotected", "veeam_repo_pct",
     ]}
     row["ts"] = time.time()
+
+    vc = ar = al = veeam = None
 
     if s.vcenter_host:
         try:
@@ -64,6 +67,12 @@ def _collect() -> dict:
                        veeam_repo_pct=veeam.repo_util_pct)
         except Exception as e:
             logger.warning(f"Snapshot Veeam: {e}")
+
+    try:
+        score, _ = _optimization_score(vc, ar, al, veeam)
+        row["score"] = score
+    except Exception as e:
+        logger.warning(f"Snapshot score: {e}")
 
     return row
 
