@@ -1,4 +1,5 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
+import { getBaseUrl } from '../api'
 
 const STEPS = ['Welcome', 'Security', 'vCenter', 'Aruba', 'Alletra', 'Veeam', 'Save']
 
@@ -155,63 +156,84 @@ function StepSecurity({ cfg, setCfg }) {
 
 function StepVCenter({ cfg, setCfg }) {
   const u = (f, v) => setCfg(c => ({ ...c, vcenter: { ...c.vcenter, [f]: v } }))
+  const v = cfg.vcenter
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
       <div style={{ fontSize: 16, fontWeight: 600 }}>VMware vCenter</div>
-      <Field label="HOST / IP" value={cfg.vcenter.host} onChange={v => u('host', v)} placeholder="vcenter.local" />
-      <Field label="USERNAME" value={cfg.vcenter.user} onChange={v => u('user', v)} placeholder="administrator@vsphere.local" />
-      <Field label="PASSWORD" value={cfg.vcenter.password} onChange={v => u('password', v)} type="password" />
+      <Field label="HOST / IP" value={v.host} onChange={val => u('host', val)} placeholder="vcenter.local" />
+      <Field label="USERNAME" value={v.user} onChange={val => u('user', val)} placeholder="administrator@vsphere.local" />
+      <Field label="PASSWORD" value={v.password} onChange={val => u('password', val)} type="password" />
       <div style={{ display: 'flex', gap: 12 }}>
         <div style={{ flex: 1 }}>
-          <Field label="PORT" value={String(cfg.vcenter.port)} onChange={v => u('port', parseInt(v) || 443)} />
+          <Field label="PORT" value={String(v.port)} onChange={val => u('port', parseInt(val) || 443)} />
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4, justifyContent: 'flex-end', paddingBottom: 2 }}>
-          <Toggle label="Verify SSL" checked={cfg.vcenter.sslVerify} onChange={v => u('sslVerify', v)} />
+          <Toggle label="Verify SSL" checked={v.sslVerify} onChange={val => u('sslVerify', val)} />
         </div>
       </div>
+      <TestRow
+        disabled={!v.host || !v.user || !v.password}
+        onTest={() => testConnector('vcenter', { host: v.host, user: v.user, password: v.password, port: v.port, ssl_verify: v.sslVerify })}
+      />
     </div>
   )
 }
 
 function StepAruba({ cfg, setCfg }) {
   const u = (f, v) => setCfg(c => ({ ...c, aruba: { ...c.aruba, [f]: v } }))
+  const a = cfg.aruba
+  const hasAuth = !!(a.accessToken || a.clientId)
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
       <div style={{ fontSize: 16, fontWeight: 600 }}>Aruba Central</div>
-      <Field label="BASE URL" value={cfg.aruba.baseUrl} onChange={v => u('baseUrl', v)} />
+      <Field label="BASE URL" value={a.baseUrl} onChange={v => u('baseUrl', v)} />
       <div style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--muted)', marginTop: -4 }}>
         Use a static access token or OAuth credentials — fill whichever applies.
       </div>
-      <Field label="ACCESS TOKEN (static)" value={cfg.aruba.accessToken} onChange={v => u('accessToken', v)} type="password" placeholder="optional" />
-      <Field label="CLIENT ID (OAuth)" value={cfg.aruba.clientId} onChange={v => u('clientId', v)} placeholder="optional" />
-      <Field label="CLIENT SECRET (OAuth)" value={cfg.aruba.clientSecret} onChange={v => u('clientSecret', v)} type="password" placeholder="optional" />
-      <Field label="CUSTOMER ID (OAuth)" value={cfg.aruba.customerId} onChange={v => u('customerId', v)} placeholder="optional" />
+      <Field label="ACCESS TOKEN (static)" value={a.accessToken} onChange={v => u('accessToken', v)} type="password" placeholder="optional" />
+      <Field label="CLIENT ID (OAuth)" value={a.clientId} onChange={v => u('clientId', v)} placeholder="optional" />
+      <Field label="CLIENT SECRET (OAuth)" value={a.clientSecret} onChange={v => u('clientSecret', v)} type="password" placeholder="optional" />
+      <Field label="CUSTOMER ID (OAuth)" value={a.customerId} onChange={v => u('customerId', v)} placeholder="optional" />
+      <TestRow
+        disabled={!hasAuth}
+        onTest={() => testConnector('aruba', { base_url: a.baseUrl, access_token: a.accessToken, client_id: a.clientId, client_secret: a.clientSecret, customer_id: a.customerId })}
+      />
     </div>
   )
 }
 
 function StepAlletra({ cfg, setCfg }) {
   const u = (f, v) => setCfg(c => ({ ...c, alletra: { ...c.alletra, [f]: v } }))
+  const a = cfg.alletra
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
       <div style={{ fontSize: 16, fontWeight: 600 }}>HPE Alletra 6000</div>
-      <Field label="HOST / IP" value={cfg.alletra.host} onChange={v => u('host', v)} placeholder="alletra6k.local" />
-      <Field label="USERNAME" value={cfg.alletra.user} onChange={v => u('user', v)} placeholder="3paradm" />
-      <Field label="PASSWORD" value={cfg.alletra.password} onChange={v => u('password', v)} type="password" />
-      <Field label="WSAPI PORT" value={String(cfg.alletra.port)} onChange={v => u('port', parseInt(v) || 8080)} />
+      <Field label="HOST / IP" value={a.host} onChange={v => u('host', v)} placeholder="alletra6k.local" />
+      <Field label="USERNAME" value={a.user} onChange={v => u('user', v)} placeholder="3paradm" />
+      <Field label="PASSWORD" value={a.password} onChange={v => u('password', v)} type="password" />
+      <Field label="WSAPI PORT" value={String(a.port)} onChange={v => u('port', parseInt(v) || 8080)} />
+      <TestRow
+        disabled={!a.host || !a.user || !a.password}
+        onTest={() => testConnector('alletra', { host: a.host, user: a.user, password: a.password, port: a.port })}
+      />
     </div>
   )
 }
 
 function StepVeeam({ cfg, setCfg }) {
   const u = (f, v) => setCfg(c => ({ ...c, veeam: { ...c.veeam, [f]: v } }))
+  const v = cfg.veeam
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
       <div style={{ fontSize: 16, fontWeight: 600 }}>Veeam Backup & Replication</div>
-      <Field label="HOST / IP" value={cfg.veeam.host} onChange={v => u('host', v)} placeholder="veeam.local" />
-      <Field label="USERNAME" value={cfg.veeam.user} onChange={v => u('user', v)} placeholder="administrator" />
-      <Field label="PASSWORD" value={cfg.veeam.password} onChange={v => u('password', v)} type="password" />
-      <Field label="REST API PORT" value={String(cfg.veeam.port)} onChange={v => u('port', parseInt(v) || 9419)} />
+      <Field label="HOST / IP" value={v.host} onChange={val => u('host', val)} placeholder="veeam.local" />
+      <Field label="USERNAME" value={v.user} onChange={val => u('user', val)} placeholder="administrator" />
+      <Field label="PASSWORD" value={v.password} onChange={val => u('password', val)} type="password" />
+      <Field label="REST API PORT" value={String(v.port)} onChange={val => u('port', parseInt(val) || 9419)} />
+      <TestRow
+        disabled={!v.host || !v.user || !v.password}
+        onTest={() => testConnector('veeam', { host: v.host, user: v.user, password: v.password, port: v.port })}
+      />
     </div>
   )
 }
@@ -328,6 +350,67 @@ function btnStyle(bg, color) {
     cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
     width: '100%',
   }
+}
+
+async function testConnector(endpoint, body) {
+  const base = await getBaseUrl()
+  const res = await fetch(`${base}/setup/test/${endpoint}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(15000),
+  })
+  return res.json()
+}
+
+function TestRow({ onTest, disabled }) {
+  const [testing, setTesting]   = useState(false)
+  const [result,  setResult]    = useState(null)
+
+  useEffect(() => { setResult(null) }, [onTest])
+
+  async function run() {
+    setTesting(true)
+    setResult(null)
+    try {
+      setResult(await onTest())
+    } catch (e) {
+      setResult({ ok: false, message: e.message })
+    } finally {
+      setTesting(false)
+    }
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
+      <button
+        type="button"
+        onClick={run}
+        disabled={disabled || testing}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 6,
+          background: 'var(--bg)', border: '0.5px solid var(--border)',
+          borderRadius: 6, padding: '0.45rem 0.75rem',
+          fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)',
+          cursor: disabled || testing ? 'not-allowed' : 'pointer',
+          opacity: disabled ? 0.5 : 1, alignSelf: 'flex-start',
+        }}
+      >
+        <i className={`ti ${testing ? 'ti-loader-2' : 'ti-plug-connected'}`} aria-hidden="true" />
+        {testing ? 'Testing…' : 'Test connection'}
+      </button>
+      {result && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 6,
+          fontFamily: 'var(--mono)', fontSize: 11,
+          color: result.ok ? 'var(--c-ok)' : 'var(--c-crit)',
+        }}>
+          <i className={`ti ${result.ok ? 'ti-circle-check' : 'ti-circle-x'}`} aria-hidden="true" />
+          {result.message}
+        </div>
+      )}
+    </div>
+  )
 }
 
 // ── Main wizard ───────────────────────────────────────────────────────────────
