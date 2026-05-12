@@ -7,12 +7,15 @@ import AlletraView from './views/AlletraView'
 import VeeamView from './views/VeeamView'
 import SettingsView from './views/SettingsView'
 
+import SurgeView from './views/SurgeView'
+
 const NAV = [
-  { id: 'summary',  label: 'Overview',    icon: 'ti-layout-dashboard' },
-  { id: 'vms',      label: 'VMs',          icon: 'ti-server-2' },
-  { id: 'aruba',    label: 'Networking',   icon: 'ti-network' },
-  { id: 'alletra',  label: 'Storage',      icon: 'ti-database' },
-  { id: 'veeam',    label: 'Backups',      icon: 'ti-cloud-upload' },
+  { id: 'summary',  label: 'Overview',      icon: 'ti-layout-dashboard' },
+  { id: 'vms',      label: 'VMs',            icon: 'ti-server-2' },
+  { id: 'surges',   label: 'Surge Alerts',   icon: 'ti-wave-sine' },
+  { id: 'aruba',    label: 'Networking',     icon: 'ti-network' },
+  { id: 'alletra',  label: 'Storage',        icon: 'ti-database' },
+  { id: 'veeam',    label: 'Backups',        icon: 'ti-cloud-upload' },
 ]
 
 function StatusDot({ status }) {
@@ -122,6 +125,7 @@ export default function App() {
             : <>
                 {view === 'summary'  && <GlassplaneView data={summary} onNavigate={setView} />}
                 {view === 'vms'      && <VMsView vcenter={summary?.vcenter} />}
+                {view === 'surges'   && <SurgeView />}
                 {view === 'aruba'    && <ArubaView data={summary?.aruba} />}
                 {view === 'alletra'  && <AlletraView data={summary?.alletra} />}
                 {view === 'veeam'    && <VeeamView data={summary?.veeam} />}

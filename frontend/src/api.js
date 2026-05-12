@@ -38,4 +38,9 @@ export const api = {
   aruba:    () => apiFetch('/api/aruba'),
   alletra:  () => apiFetch('/api/alletra'),
   veeam:    () => apiFetch('/api/veeam'),
+  surges:   (params = {}) => {
+    const q = new URLSearchParams(params).toString()
+    return apiFetch(`/api/vcenter/surges${q ? '?' + q : ''}`)
+  },
 }
+

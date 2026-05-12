@@ -257,3 +257,81 @@ async def get_summary():
         optimization_score=score,
         top_recommendations=recs
     )
+
+
+# ── Surge detection router ────────────────────────────────────────────────────
+
+surge_router = APIRouter(prefix="/vcenter/surges", tags=["Surge Detection"])
+
+
+def _vm_surge_to_schema(r: VMSurgeResult) -> VMSurgeResultSchema:
+    return VMSurgeResultSchema(
+        vm_id=r.vm_id,
+        name=r.name,
+        cluster=r.cluster,
+        host=r.host,
+        metric=r.metric,
+        series=r.series,
+        series_timestamps=r.series_timestamps,
+        threshold_pct=r.threshold_pct,
+        surge_events=[SurgeEventSchema(
+            timestamp=str(e.timestamp),
+            minute_offset=e.minute_offset,
+            peak_pct=e.peak_pct
+        ) for e in r.surge_events],
+        periods=[SurgePeriodSchema(
+            period_min=p.period_min,
+            occurrences=p.occurrences,
+            offsets=p.offsets,
+            confidence=round(p.confidence, 2)
+        ) for p in r.periods],
+        max_pct=r.max_pct,
+        avg_pct=r.avg_pct,
+        is_cyclic=r.is_cyclic,
+    )
+
+
+@surge_router.get("/", response_model=SurgeSummarySchema)
+def get_surges(
+    threshold: float = 80.0,
+    metric: str = "cpu",
+    lookback_hours: float = 2.0,
+    vm_filter: Optional[str] = None,
+    cyclic_only: bool = False,
+):
+    """
+    Scan VMs for cyclic CPU/RAM surge patterns.
+
+    - threshold: % above which a sample is considered a surge (default 80)
+    - metric: cpu | ram
+    - lookback_hours: how far back to pull data (default 2, max 24)
+    - vm_filter: optional substring match on VM name
+    - cyclic_only: if true, omit non-cyclic VMs from all_vms list
+    """
+    if metric not in ("cpu", "ram"):
+        raise HTTPException(status_code=400, detail="metric must be cpu or ram")
+    lookback_hours = min(max(0.5, lookback_hours), 24.0)
+
+    try:
+        results = fetch_vm_surges(
+            threshold_pct=threshold,
+            metric=metric,
+            lookback_hours=lookback_hours,
+            vm_name_filter=vm_filter,
+        )
+    except Exception as e:
+        logger.error(f"Surge detection error: {e}", exc_info=True)
+        raise HTTPException(status_code=502, detail=str(e))
+
+    cyclic = [r for r in results if r.is_cyclic]
+    output = cyclic if cyclic_only else results
+
+    return SurgeSummarySchema(
+        vms_scanned=len(results),
+        vms_flagged=len(cyclic),
+        threshold_pct=threshold,
+        metric=metric,
+        lookback_hours=lookback_hours,
+        cyclic_vms=[_vm_surge_to_schema(r) for r in cyclic],
+        all_vms=[_vm_surge_to_schema(r) for r in output],
+    )
