@@ -17,6 +17,7 @@ from models.schemas import (
     GlassplaneSummary, HealthStatus, ESXiHostDetail, VMSnapshotSummary, WirelessSummary
 )
 from connectors.vcenter import fetch_vcenter_summary, fetch_vcenter_hosts, fetch_vm_snapshots
+from connectors.aruba import fetch_aruba_summary, fetch_aruba_wireless
 from connectors.alletra import fetch_alletra_summary
 from connectors.veeam import fetch_veeam_summary
 from connectors.vcenter_perf import fetch_vm_surges, VMSurgeResult
