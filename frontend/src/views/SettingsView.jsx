@@ -183,6 +183,7 @@ export default function SettingsView() {
 
   const [cfg,        setCfg]        = useState(null)
   const [loadErr,    setLoadErr]    = useState(null)
+  const [retrying,   setRetrying]   = useState(false)
   const [health,     setHealth]     = useState(null)
   const [baseUrl,    setBaseUrl]    = useState('')
   const [saveStatus, setSaveStatus] = useState('idle')  // idle | saving | saved | error | copied
@@ -205,10 +206,16 @@ export default function SettingsView() {
     setSaveStatus('idle')
   }, [])
 
+  function loadConfig() {
+    setLoadErr(null)
+    setRetrying(true)
+    apiFetch('/setup/config', { signal: AbortSignal.timeout(30000) })
+      .then(data => { setCfg(data); setRetrying(false) })
+      .catch(e => { setLoadErr(e.message); setRetrying(false) })
+  }
+
   useEffect(() => {
-    apiFetch('/setup/config')
-      .then(data => setCfg(data))
-      .catch(e => setLoadErr(e.message))
+    loadConfig()
 
     apiFetch('/api/alerts/status')
       .then(setAlertStatus)
@@ -332,18 +339,32 @@ export default function SettingsView() {
   if (!cfg && !loadErr) {
     return (
       <div style={{ padding: '3rem', textAlign: 'center', fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--muted)' }}>
-        loading config…
+        {retrying ? 'loading config…' : 'loading config…'}
       </div>
     )
   }
 
   if (loadErr) {
     return (
-      <div style={{ maxWidth: 480 }}>
+      <div style={{ maxWidth: 480, display: 'flex', flexDirection: 'column', gap: 12 }}>
         <div style={{ background: '#fee2e2', border: '0.5px solid #fca5a5', borderRadius: 8, padding: '0.75rem 1rem', fontFamily: 'var(--mono)', fontSize: 12, color: '#991b1b' }}>
           <i className="ti ti-alert-circle" style={{ marginRight: 6 }} aria-hidden="true" />
           Could not load config: {loadErr}
         </div>
+        <button
+          onClick={loadConfig}
+          disabled={retrying}
+          style={{
+            alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: 6,
+            background: 'var(--surface)', border: '0.5px solid var(--border)',
+            borderRadius: 6, padding: '0.45rem 0.9rem',
+            fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--text)',
+            cursor: retrying ? 'not-allowed' : 'pointer',
+          }}
+        >
+          <i className={`ti ${retrying ? 'ti-loader-2' : 'ti-refresh'}`} aria-hidden="true" />
+          {retrying ? 'Retrying…' : 'Retry'}
+        </button>
       </div>
     )
   }

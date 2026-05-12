@@ -15,7 +15,7 @@ setup_router = APIRouter(prefix="/setup", tags=["Setup"])
 
 
 @setup_router.get("/config", dependencies=[Depends(verify_api_key)])
-def get_config():
+async def get_config():
     s = get_settings()
     return {
         "apiKey":           s.api_key,
@@ -84,13 +84,13 @@ def get_config():
 
 
 @setup_router.post("/reload", dependencies=[Depends(verify_api_key)])
-def reload_config():
+async def reload_config():
     get_settings.cache_clear()
     return {"ok": True, "message": "Configuration reloaded — new settings are active"}
 
 
 @setup_router.get("/status")
-def setup_status():
+async def setup_status():
     s = get_settings()
     configured = any([
         s.vcenter_host, s.alletra_host, s.veeam_host,

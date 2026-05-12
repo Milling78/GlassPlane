@@ -13,13 +13,13 @@ alerts_router = APIRouter(prefix="/alerts", tags=["Alerts"], dependencies=[Depen
 
 
 @alerts_router.get("/status")
-def alert_status():
+async def alert_status():
     active = get_active()
     return {"active_count": len(active), "active": active}
 
 
 @alerts_router.get("/history")
-def alert_history(limit: int = 100):
+async def alert_history(limit: int = 100):
     return {"history": get_history()[:limit]}
 
 
