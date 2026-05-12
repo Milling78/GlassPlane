@@ -44,18 +44,9 @@ function waitForBackend(port, retries = 40, delayMs = 500) {
 }
 
 function getBackendBinary() {
-  if (isDev) {
-    // In dev, run Python directly
-    return null
-  }
-  const platform = process.platform
-  const binName = platform === 'win32' ? 'glassplane-backend.exe' : 'glassplane-backend'
-  // electron-builder copies extraResources to process.resourcesPath
+  if (isDev) return null
+  const binName = process.platform === 'win32' ? 'glassplane-backend.exe' : 'glassplane-backend'
   return path.join(process.resourcesPath, 'backend', binName)
-}
-
-function getBackendArgs(port) {
-  return ['--host', '127.0.0.1', '--port', String(port)]
 }
 
 // ── Backend lifecycle ─────────────────────────────────────────────────────────
@@ -65,7 +56,6 @@ async function startBackend() {
   const bin = getBackendBinary()
 
   if (!bin) {
-    // Dev mode: run uvicorn directly
     const backendDir = path.join(__dirname, '..', 'backend')
     backendProcess = spawn(
       process.platform === 'win32' ? 'python' : 'python3',
@@ -74,7 +64,7 @@ async function startBackend() {
     )
   } else {
     if (!fs.existsSync(bin)) throw new Error(`Backend binary not found: ${bin}`)
-    backendProcess = spawn(bin, getBackendArgs(backendPort), {
+    backendProcess = spawn(bin, ['--host', '127.0.0.1', '--port', String(backendPort)], {
       env: { ...process.env, PYTHONUNBUFFERED: '1' }
     })
   }
@@ -120,14 +110,12 @@ function createWindow(port) {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      // Allow loading from localhost backend
       webSecurity: true,
     },
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     show: false,
   })
 
-  // Inject backend port so the frontend knows where to call
   mainWindow.webContents.on('did-finish-load', () => {
     mainWindow.webContents.executeJavaScript(
       `window.__BACKEND_PORT__ = ${port};`
@@ -135,7 +123,6 @@ function createWindow(port) {
   })
 
   if (isDev) {
-    // Vite dev server
     mainWindow.loadURL('http://localhost:5173')
     mainWindow.webContents.openDevTools()
   } else {
@@ -144,13 +131,80 @@ function createWindow(port) {
 
   mainWindow.once('ready-to-show', () => mainWindow.show())
 
-  // Open external links in the system browser, not Electron
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url)
     return { action: 'deny' }
   })
 
   mainWindow.on('closed', () => { mainWindow = null })
+}
+
+// ── Auto-updater ──────────────────────────────────────────────────────────────
+
+function initAutoUpdater() {
+  if (isDev) return
+
+  let autoUpdater
+  try {
+    autoUpdater = require('electron-updater').autoUpdater
+  } catch (e) {
+    console.warn('[updater] electron-updater not available:', e.message)
+    return
+  }
+
+  autoUpdater.autoDownload = true
+  autoUpdater.autoInstallOnAppQuit = true
+
+  autoUpdater.on('checking-for-update', () => {
+    console.log('[updater] checking for update…')
+    mainWindow?.webContents.send('update-status', { status: 'checking' })
+  })
+
+  autoUpdater.on('update-available', (info) => {
+    console.log(`[updater] update available: ${info.version}`)
+    mainWindow?.webContents.send('update-status', { status: 'available', version: info.version })
+  })
+
+  autoUpdater.on('update-not-available', () => {
+    console.log('[updater] up to date')
+    mainWindow?.webContents.send('update-status', { status: 'current' })
+  })
+
+  autoUpdater.on('download-progress', (prog) => {
+    const pct = Math.round(prog.percent)
+    console.log(`[updater] downloading… ${pct}%`)
+    mainWindow?.webContents.send('update-status', { status: 'downloading', percent: pct })
+  })
+
+  autoUpdater.on('update-downloaded', (info) => {
+    console.log(`[updater] update downloaded: ${info.version}`)
+    mainWindow?.webContents.send('update-status', { status: 'ready', version: info.version })
+
+    dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      title: 'Update ready',
+      message: `Infra Glassplane ${info.version} has been downloaded.`,
+      detail: 'Restart now to apply the update, or it will install automatically when you next close the app.',
+      buttons: ['Restart now', 'Later'],
+      defaultId: 0,
+      cancelId: 1,
+    }).then(({ response }) => {
+      if (response === 0) {
+        autoUpdater.quitAndInstall(false, true)
+      }
+    })
+  })
+
+  autoUpdater.on('error', (err) => {
+    console.error('[updater] error:', err)
+    mainWindow?.webContents.send('update-status', { status: 'error', message: err.message })
+  })
+
+  // Check 10 seconds after launch to let the window load first
+  setTimeout(() => autoUpdater.checkForUpdates(), 10_000)
+
+  ipcMain.handle('check-for-updates', () => autoUpdater.checkForUpdates())
+  ipcMain.handle('install-update',    () => autoUpdater.quitAndInstall(false, true))
 }
 
 // ── IPC handlers ──────────────────────────────────────────────────────────────
@@ -162,9 +216,7 @@ ipcMain.handle('open-env-file', async () => {
     ? path.join(__dirname, '..', 'backend', '.env')
     : path.join(app.getPath('userData'), '.env')
   if (!fs.existsSync(envPath)) {
-    const example = isDev
-      ? path.join(__dirname, '..', 'backend', '.env.example')
-      : null
+    const example = isDev ? path.join(__dirname, '..', 'backend', '.env.example') : null
     if (example && fs.existsSync(example)) {
       fs.copyFileSync(example, envPath)
     } else {
@@ -192,12 +244,19 @@ ipcMain.handle('relaunch-app', () => {
   app.exit(0)
 })
 
+ipcMain.handle('open-external', (_, url) => {
+  shell.openExternal(url)
+})
+
+ipcMain.handle('get-app-version', () => app.getVersion())
+
 // ── App lifecycle ─────────────────────────────────────────────────────────────
 
 app.whenReady().then(async () => {
   try {
     const port = await startBackend()
     createWindow(port)
+    initAutoUpdater()
   } catch (err) {
     console.error('[main] startup error:', err)
     dialog.showErrorBox(
@@ -219,7 +278,6 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', stopBackend)
 
-// Graceful crash recovery
 process.on('uncaughtException', (err) => {
   console.error('[main] uncaughtException:', err)
 })

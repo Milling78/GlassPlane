@@ -14,10 +14,9 @@ from security import verify_api_key
 from config import get_settings
 from models.schemas import (
     VCenterSummary, ArubaSummary, AlletraSummary, VeeamSummary,
-    GlassplaneSummary, HealthStatus
+    GlassplaneSummary, HealthStatus, ESXiHostDetail, VMSnapshotSummary, WirelessSummary
 )
-from connectors.vcenter import fetch_vcenter_summary
-from connectors.aruba import fetch_aruba_summary
+from connectors.vcenter import fetch_vcenter_summary, fetch_vcenter_hosts, fetch_vm_snapshots
 from connectors.alletra import fetch_alletra_summary
 from connectors.veeam import fetch_veeam_summary
 
@@ -60,7 +59,27 @@ def get_vcenter():
         raise HTTPException(status_code=502, detail=str(e))
 
 
-@vcenter_router.get("/vms", response_model=list[VMSummary])
+@vcenter_router.get("/snapshots", response_model=list[VMSnapshotSummary])
+@cached("vcenter_snapshots")
+def get_snapshots():
+    try:
+        return fetch_vm_snapshots()
+    except Exception as e:
+        logger.error(f"vCenter snapshots error: {e}", exc_info=True)
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@vcenter_router.get("/hosts", response_model=list[ESXiHostDetail])
+@cached("vcenter_hosts")
+def get_vcenter_hosts():
+    try:
+        return fetch_vcenter_hosts()
+    except Exception as e:
+        logger.error(f"vCenter hosts error: {e}", exc_info=True)
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@vcenter_router.get("/vms")
 def get_vms(
     cluster: Optional[str] = None,
     flag: Optional[str] = None,      # idle | oversized | off | clean
@@ -121,6 +140,27 @@ def get_aruba():
         return fetch_aruba_summary()
     except Exception as e:
         logger.error(f"Aruba error: {e}", exc_info=True)
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@aruba_router.get("/wireless", response_model=WirelessSummary)
+@cached("aruba_wireless")
+def get_aruba_wireless():
+    try:
+        return fetch_aruba_wireless()
+    except Exception as e:
+        logger.error(f"Aruba wireless error: {e}", exc_info=True)
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@aruba_router.get("/direct")
+@cached("aruba_direct")
+def get_aruba_direct():
+    try:
+        from connectors.aruba_direct import fetch_direct_switches
+        return fetch_direct_switches()
+    except Exception as e:
+        logger.error(f"Aruba direct error: {e}", exc_info=True)
         raise HTTPException(status_code=502, detail=str(e))
 
 

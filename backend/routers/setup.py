@@ -34,6 +34,14 @@ def get_config():
             "customerId":   s.aruba_customer_id,
             "accessToken":  s.aruba_access_token,
         },
+        "arubaDirectSwitches": {
+            "hosts":      s.aruba_direct_hosts,
+            "user":       s.aruba_direct_user,
+            "password":   s.aruba_direct_password,
+            "port":       s.aruba_direct_port,
+            "sshPort":    s.aruba_direct_ssh_port,
+            "sslVerify":  s.aruba_direct_ssl_verify,
+        },
         "alletra": {
             "host":     s.alletra_host,
             "user":     s.alletra_user,
@@ -118,6 +126,14 @@ class VeeamTestReq(BaseModel):
     user: str
     password: str
     port: int = 9419
+
+class ArubaDirectTestReq(BaseModel):
+    host: str
+    user: str
+    password: str
+    port: int = 443
+    ssh_port: int = 22
+    ssl_verify: bool = False
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -223,6 +239,42 @@ def test_alletra(req: AlletraTestReq):
     except Exception as e:
         logger.debug(f"Alletra test failed: {e}")
         return {"ok": False, "message": _friendly(e)}
+
+
+@setup_router.post("/test/aruba-direct")
+def test_aruba_direct(req: ArubaDirectTestReq):
+    # Try AOS-CX REST first
+    try:
+        base = f"https://{req.host}:{req.port}/rest/v10.08"
+        with httpx.Client(verify=req.ssl_verify, timeout=10) as client:
+            resp = client.post(f"{base}/login", data={"username": req.user, "password": req.password})
+            resp.raise_for_status()
+            sys_resp = client.get(f"{base}/system", params={"attributes": "hostname,platform_name"})
+            client.post(f"{base}/logout")
+            sys_resp.raise_for_status()
+            d = sys_resp.json()
+            name = d.get("hostname", req.host)
+            model = d.get("platform_name", "AOS-CX")
+            return {"ok": True, "message": f"AOS-CX REST — {name} ({model})", "method": "aoscx"}
+    except Exception as rest_err:
+        pass
+
+    # Fall back to SSH
+    try:
+        import paramiko, time
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        client.connect(req.host, port=req.ssh_port, username=req.user, password=req.password,
+                       timeout=10, look_for_keys=False, allow_agent=False)
+        _, stdout, _ = client.exec_command("show system information", timeout=10)
+        out = stdout.read().decode("utf-8", errors="replace")
+        client.close()
+        import re
+        name_m = re.search(r"System Name\s*:\s*(.+)", out)
+        name = name_m.group(1).strip() if name_m else req.host
+        return {"ok": True, "message": f"SSH — {name}", "method": "ssh"}
+    except Exception as ssh_err:
+        return {"ok": False, "message": f"REST: {_friendly(rest_err)} | SSH: {_friendly(ssh_err)}"}
 
 
 @setup_router.post("/test/veeam")

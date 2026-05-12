@@ -1,6 +1,81 @@
 import React from 'react'
 import Sparkline from '../components/Sparkline'
 
+// ── Runway helpers ─────────────────────────────────────────────────────────────
+
+function RunwayChip({ days }) {
+  if (days == null) return null
+  const [bg, color] =
+    days < 14  ? ['rgba(239,68,68,0.12)',  'var(--c-crit)'] :
+    days < 30  ? ['rgba(239,68,68,0.08)',  'var(--c-crit)'] :
+    days < 60  ? ['rgba(245,158,11,0.12)', 'var(--c-warn)'] :
+                 ['rgba(34,197,94,0.10)',  'var(--c-green)']
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10, fontFamily: 'var(--mono)', fontWeight: 700, color, background: bg, borderRadius: 6, padding: '2px 7px' }}>
+      <i className="ti ti-clock-hour-4" aria-hidden="true" />
+      {days}d
+    </span>
+  )
+}
+
+function TrendArrow({ trend, slopePerDay, unit, higherIsBad }) {
+  const arrow = trend === 'rising' ? '↑' : trend === 'falling' ? '↓' : '→'
+  const isBad = trend !== 'stable' && (
+    (higherIsBad && trend === 'rising') || (!higherIsBad && trend === 'falling')
+  )
+  const color = trend === 'stable' ? 'var(--muted)' : isBad ? 'var(--c-warn)' : 'var(--c-green)'
+  const sign  = slopePerDay >= 0 ? '+' : ''
+  const delta = Math.abs(slopePerDay) < 10
+    ? `${sign}${slopePerDay.toFixed(1)}${unit}/d`
+    : `${sign}${Math.round(slopePerDay)}${unit}/d`
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11, fontFamily: 'var(--mono)', color }}>
+      {arrow} {trend === 'stable' ? 'stable' : delta}
+    </span>
+  )
+}
+
+function RunwayRow({ f }) {
+  const hasThreshold = f.threshold != null
+  const currentFmt = f.current == null ? '—'
+    : f.unit === '%' ? `${f.current.toFixed(1)}%`
+    : f.unit === 'W' ? `${Math.round(f.current)} W`
+    : String(Math.round(f.current))
+
+  const improving = (f.higher_is_bad && f.trend === 'falling') || (!f.higher_is_bad && f.trend === 'rising')
+
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '160px 70px 140px 90px 1fr', alignItems: 'center', gap: 12, padding: '7px 0', borderBottom: '0.5px solid var(--border)' }}>
+      <span style={{ fontSize: 12, color: 'var(--text)' }}>{f.label}</span>
+      <span style={{ fontSize: 12, fontFamily: 'var(--mono)', color: 'var(--muted)', textAlign: 'right' }}>{currentFmt}</span>
+      <span><TrendArrow trend={f.trend} slopePerDay={f.slope_per_day} unit={f.unit} higherIsBad={f.higher_is_bad} /></span>
+      <span>
+        {f.days_until_threshold != null
+          ? <RunwayChip days={f.days_until_threshold} />
+          : hasThreshold && f.current != null
+            ? <span style={{ fontSize: 10, fontFamily: 'var(--mono)', color: improving ? 'var(--c-green)' : 'var(--muted)' }}>
+                {improving ? 'improving' : 'stable'}
+              </span>
+            : null
+        }
+      </span>
+      <div style={{ minWidth: 80 }}>
+        {f.history.some(v => v != null) && (
+          <Sparkline
+            data={f.history}
+            color={f.days_until_threshold != null && f.days_until_threshold < 30
+              ? 'var(--c-crit)'
+              : f.days_until_threshold != null && f.days_until_threshold < 60
+                ? 'var(--c-warn)'
+                : 'var(--c-blue)'}
+            height={24}
+          />
+        )}
+      </div>
+    </div>
+  )
+}
+
 function StatusDot({ status }) {
   const cls = { ok: 'dot-ok', warning: 'dot-warn', critical: 'dot-crit' }
   return <span className={`dot ${cls[status] ?? 'dot-off'}`} />
@@ -37,7 +112,7 @@ function ScoreRing({ score }) {
   )
 }
 
-export default function GlassplaneView({ data, history = [], iloSummary, onNavigate }) {
+export default function GlassplaneView({ data, history = [], iloSummary, forecast, onNavigate }) {
   if (!data) return null
   const { vcenter, aruba, alletra, veeam, optimization_score, top_recommendations, overall_status } = data
 
@@ -94,6 +169,37 @@ export default function GlassplaneView({ data, history = [], iloSummary, onNavig
           </div>
         </div>
       )}
+
+      {/* Capacity runway */}
+      {forecast && (() => {
+        const active = forecast.forecasts.filter(f => f.current != null)
+        if (!active.length) return null
+        const urgent = active.filter(f => f.days_until_threshold != null && f.days_until_threshold < 60)
+        return (
+          <div className="card" style={{ marginBottom: '1rem' }}>
+            <div className="card-header">
+              <div className="card-title">
+                <i className="ti ti-timeline" style={{ color: 'var(--c-blue)' }} aria-hidden="true" />
+                Capacity runway
+              </div>
+              <span style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--muted)' }}>
+                {forecast.data_points} snapshots · linear trend
+                {urgent.length > 0 && (
+                  <span style={{ marginLeft: 8, color: 'var(--c-crit)', fontWeight: 600 }}>
+                    {urgent.length} metric{urgent.length > 1 ? 's' : ''} nearing threshold
+                  </span>
+                )}
+              </span>
+            </div>
+            <div className="card-body" style={{ paddingBottom: 2 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '160px 70px 140px 90px 1fr', gap: 12, padding: '4px 0 6px', borderBottom: '0.5px solid var(--border)', color: 'var(--muted)', fontSize: 10, fontFamily: 'var(--mono)', textTransform: 'uppercase', letterSpacing: '.05em' }}>
+                <span>Metric</span><span style={{ textAlign: 'right' }}>Current</span><span>Trend</span><span>Runway</span><span>History</span>
+              </div>
+              {active.map(f => <RunwayRow key={f.metric} f={f} />)}
+            </div>
+          </div>
+        )
+      })()}
 
       {/* Subsystem cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12 }}>

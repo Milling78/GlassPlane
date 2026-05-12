@@ -60,6 +60,14 @@ class Settings(BaseSettings):
     alert_veeam_unprotected_vms: int = 1
     alert_veeam_repo_util_pct: float = 80.0
 
+    # Aruba direct (AOS-CX REST / SSH fallback)
+    aruba_direct_hosts: str = ""     # comma-separated IPs or hostnames
+    aruba_direct_user: str = ""
+    aruba_direct_password: str = ""
+    aruba_direct_port: int = 443     # HTTPS port for AOS-CX REST
+    aruba_direct_ssh_port: int = 22  # SSH port for ProCurve fallback
+    aruba_direct_ssl_verify: bool = False
+
     # HPE iLO / Redfish
     ilo_hosts: str = ""          # comma-separated hostnames/IPs
     ilo_user: str = ""

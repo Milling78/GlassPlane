@@ -63,9 +63,14 @@ export const api = {
     const q = new URLSearchParams(params).toString()
     return apiFetch(`/api/vcenter/surges${q ? '?' + q : ''}`)
   },
+  vcenterHosts:        () => apiFetch('/api/vcenter/hosts'),
+  vcenterSnapshots:    () => apiFetch('/api/vcenter/snapshots'),
+  arubaDirectSwitches: () => apiFetch('/api/aruba/direct'),
+  arubaWireless:       () => apiFetch('/api/aruba/wireless'),
   history:  (hours = 24) => apiFetch(`/api/history?hours=${hours}`),
   ilo:           () => apiFetch('/api/ilo/'),
   veeamSessions: (days = 30) => apiFetch(`/api/veeam/sessions?days=${days}`),
+  forecast:     () => apiFetch('/api/forecast/'),
   alertStatus:  () => apiFetch('/api/alerts/status'),
   alertHistory: (limit = 100) => apiFetch(`/api/alerts/history?limit=${limit}`),
   alertCheck:   () => apiFetch('/api/alerts/check', { method: 'POST' }),

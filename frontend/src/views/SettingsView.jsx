@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { apiFetch, getBaseUrl } from '../api'
 import { buildEnvContent } from '../utils/env'
 
@@ -191,6 +191,11 @@ export default function SettingsView() {
   const [alertStatus, setAlertStatus] = useState(null)  // { active_count, active }
   const [testWebhook, setTestWebhook] = useState('idle') // idle | sending | ok | error
   const [testWebhookMsg, setTestWebhookMsg] = useState('')
+  const [importStatus, setImportStatus] = useState('idle')  // idle | ok | error
+  const [importMsg,    setImportMsg]    = useState('')
+  const importFileRef = useRef(null)
+  const [appVersion,   setAppVersion]   = useState(null)
+  const [updateStatus, setUpdateStatus] = useState(null)  // null | checking | available | downloading | ready | current | error
 
   const u = useCallback((section, field, value) => {
     setCfg(c => section
@@ -213,6 +218,17 @@ export default function SettingsView() {
       setBaseUrl(b || 'http://localhost:8000')
       fetch((b || '') + '/health').then(r => r.json()).then(setHealth).catch(() => setHealth(null))
     })
+
+    if (window.glassplane?.getAppVersion) {
+      window.glassplane.getAppVersion().then(v => setAppVersion(v)).catch(() => {})
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!window.glassplane?.onUpdateStatus) return
+    const handler = (data) => setUpdateStatus(data)
+    window.glassplane.onUpdateStatus(handler)
+    return () => window.glassplane.offUpdateStatus?.(handler)
   }, [])
 
   async function sendTestWebhook() {
@@ -227,6 +243,67 @@ export default function SettingsView() {
       setTestWebhookMsg(e.message)
     }
     setTimeout(() => setTestWebhook('idle'), 5000)
+  }
+
+  function exportConfig() {
+    const payload = {
+      version: 1,
+      app: 'glassplane',
+      exported_at: new Date().toISOString(),
+      config: cfg,
+    }
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+    const url  = URL.createObjectURL(blob)
+    const a    = document.createElement('a')
+    a.href     = url
+    a.download = `glassplane-config-${new Date().toISOString().slice(0, 10)}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  function handleImportFile(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''  // reset so same file can be re-selected
+
+    const reader = new FileReader()
+    reader.onload = ev => {
+      try {
+        const raw     = JSON.parse(ev.target.result)
+        const imported = raw.config ?? raw   // support both wrapped and bare format
+
+        // Basic structure validation
+        const knownKeys = ['vcenter', 'aruba', 'alletra', 'veeam', 'ilo', 'alerts', 'apiKey']
+        const found = knownKeys.filter(k => imported[k] !== undefined)
+        if (found.length === 0) throw new Error('File does not look like a Glassplane config')
+
+        // Deep-merge: keep any current keys the import doesn't have
+        setCfg(current => {
+          const merged = { ...current }
+          for (const key of Object.keys(imported)) {
+            if (merged[key] !== null && typeof merged[key] === 'object' && !Array.isArray(merged[key])) {
+              merged[key] = { ...merged[key], ...imported[key] }
+            } else {
+              merged[key] = imported[key]
+            }
+          }
+          return merged
+        })
+        setSaveStatus('idle')
+
+        const exportedAt = raw.exported_at
+          ? ` (exported ${new Date(raw.exported_at).toLocaleDateString()})`
+          : ''
+        setImportStatus('ok')
+        setImportMsg(`Imported${exportedAt} · ${found.join(', ')} — review and save to apply`)
+        setTimeout(() => setImportStatus('idle'), 8000)
+      } catch (err) {
+        setImportStatus('error')
+        setImportMsg(err.message)
+        setTimeout(() => setImportStatus('idle'), 6000)
+      }
+    }
+    reader.readAsText(file)
   }
 
   async function handleSave() {
@@ -344,6 +421,46 @@ export default function SettingsView() {
         <TestRow
           disabled={!cfg.aruba.accessToken && !cfg.aruba.clientId}
           onTest={() => testConnector('aruba', { base_url: cfg.aruba.baseUrl, access_token: cfg.aruba.accessToken, client_id: cfg.aruba.clientId, client_secret: cfg.aruba.clientSecret, customer_id: cfg.aruba.customerId })}
+        />
+      </Section>
+
+      {/* Aruba Direct */}
+      <Section icon="ti-plug-connected" title="Aruba — Direct switches (no Central)" iconColor="var(--c-ok)">
+        <div style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--muted)', lineHeight: 1.6 }}>
+          Connect directly to switches without Aruba Central. Tries AOS-CX REST first, falls back to SSH for ProCurve / Provision.
+        </div>
+        <Field
+          label="HOSTS (comma-separated IPs or hostnames)"
+          value={cfg.arubaDirectSwitches?.hosts ?? ''}
+          onChange={v => u('arubaDirectSwitches', 'hosts', v)}
+          placeholder="192.168.1.10, 192.168.1.11"
+        />
+        <Row>
+          <div style={{ flex: 2 }}>
+            <Field label="USERNAME" value={cfg.arubaDirectSwitches?.user ?? ''} onChange={v => u('arubaDirectSwitches', 'user', v)} placeholder="admin" />
+          </div>
+          <div style={{ flex: 1 }}>
+            <Field label="HTTPS PORT" value={String(cfg.arubaDirectSwitches?.port ?? 443)} onChange={v => u('arubaDirectSwitches', 'port', parseInt(v) || 443)} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <Field label="SSH PORT" value={String(cfg.arubaDirectSwitches?.sshPort ?? 22)} onChange={v => u('arubaDirectSwitches', 'sshPort', parseInt(v) || 22)} />
+          </div>
+        </Row>
+        <Field label="PASSWORD" value={cfg.arubaDirectSwitches?.password ?? ''} onChange={v => u('arubaDirectSwitches', 'password', v)} type="password" />
+        <Toggle label="Verify SSL certificate" checked={cfg.arubaDirectSwitches?.sslVerify ?? false} onChange={v => u('arubaDirectSwitches', 'sslVerify', v)} />
+        <TestRow
+          disabled={!cfg.arubaDirectSwitches?.hosts || !cfg.arubaDirectSwitches?.user || !cfg.arubaDirectSwitches?.password}
+          onTest={() => {
+            const firstHost = (cfg.arubaDirectSwitches?.hosts ?? '').split(',')[0].trim()
+            return testConnector('aruba-direct', {
+              host: firstHost,
+              user: cfg.arubaDirectSwitches?.user,
+              password: cfg.arubaDirectSwitches?.password,
+              port: cfg.arubaDirectSwitches?.port ?? 443,
+              ssh_port: cfg.arubaDirectSwitches?.sshPort ?? 22,
+              ssl_verify: cfg.arubaDirectSwitches?.sslVerify ?? false,
+            })
+          }}
         />
       </Section>
 
@@ -551,6 +668,52 @@ export default function SettingsView() {
           </button>
         </div>
 
+        {/* Export / Import */}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', paddingTop: 4, borderTop: '0.5px solid var(--border)', marginTop: 2 }}>
+          <button
+            onClick={exportConfig}
+            disabled={!cfg}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              background: 'var(--bg)', border: '0.5px solid var(--border)',
+              borderRadius: 6, padding: '0.45rem 0.75rem',
+              fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)',
+              cursor: cfg ? 'pointer' : 'not-allowed', opacity: cfg ? 1 : 0.5,
+            }}
+          >
+            <i className="ti ti-download" aria-hidden="true" />
+            Export config
+          </button>
+          <button
+            onClick={() => importFileRef.current?.click()}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              background: 'var(--bg)', border: '0.5px solid var(--border)',
+              borderRadius: 6, padding: '0.45rem 0.75rem',
+              fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)', cursor: 'pointer',
+            }}
+          >
+            <i className="ti ti-upload" aria-hidden="true" />
+            Import config
+          </button>
+          <input
+            ref={importFileRef}
+            type="file"
+            accept=".json,application/json"
+            style={{ display: 'none' }}
+            onChange={handleImportFile}
+          />
+          {importStatus !== 'idle' && (
+            <span style={{
+              fontFamily: 'var(--mono)', fontSize: 11, display: 'flex', alignItems: 'center', gap: 5,
+              color: importStatus === 'ok' ? 'var(--c-green)' : 'var(--c-crit)',
+            }}>
+              <i className={`ti ${importStatus === 'ok' ? 'ti-circle-check' : 'ti-circle-x'}`} aria-hidden="true" />
+              {importMsg}
+            </span>
+          )}
+        </div>
+
         {saveMsg && (
           <div style={{
             fontFamily: 'var(--mono)', fontSize: 11, padding: '0.5rem 0.75rem',
@@ -577,10 +740,62 @@ export default function SettingsView() {
       {/* About */}
       <Section icon="ti-info-circle" title="About">
         <div style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--muted)', lineHeight: 2 }}>
-          <div>Infra Glassplane v1.0.0</div>
+          <div>Infra Glassplane {appVersion ? `v${appVersion}` : 'v1.0.0'}</div>
           <div>Backend: FastAPI + pyVmomi + httpx</div>
           <div>Frontend: React + Vite{isElectron ? ' + Electron' : ''}</div>
+          <div>License: MIT — see COMMERCIAL.md for commercial use</div>
         </div>
+        {isElectron && (
+          <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
+            <button
+              onClick={() => {
+                setUpdateStatus({ status: 'checking' })
+                window.glassplane.checkForUpdates().catch(() => setUpdateStatus({ status: 'error', message: 'Check failed' }))
+              }}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                background: 'var(--bg)', border: '0.5px solid var(--border)',
+                borderRadius: 6, padding: '0.4rem 0.75rem',
+                fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)', cursor: 'pointer',
+              }}
+            >
+              <i className="ti ti-refresh" aria-hidden="true" />
+              Check for updates
+            </button>
+
+            {updateStatus && (() => {
+              const { status, version, percent, message } = updateStatus
+              const map = {
+                checking:    { icon: 'ti-loader-2', color: 'var(--muted)',    text: 'Checking…' },
+                available:   { icon: 'ti-arrow-up-circle', color: 'var(--c-blue)',  text: `v${version} available — downloading…` },
+                downloading: { icon: 'ti-loader-2', color: 'var(--c-blue)',  text: `Downloading… ${percent ?? 0}%` },
+                ready:       { icon: 'ti-circle-check', color: 'var(--c-green)', text: `v${version} ready — restart to install` },
+                current:     { icon: 'ti-circle-check', color: 'var(--c-green)', text: 'Up to date' },
+                error:       { icon: 'ti-circle-x',    color: 'var(--c-crit)',  text: message ?? 'Update error' },
+              }
+              const entry = map[status]
+              if (!entry) return null
+              return (
+                <span style={{ fontFamily: 'var(--mono)', fontSize: 11, display: 'flex', alignItems: 'center', gap: 5, color: entry.color }}>
+                  <i className={`ti ${entry.icon}`} aria-hidden="true" />
+                  {entry.text}
+                  {status === 'ready' && (
+                    <button
+                      onClick={() => window.glassplane.installUpdate()}
+                      style={{
+                        marginLeft: 6, background: 'var(--c-green)', color: '#fff',
+                        border: 'none', borderRadius: 4, padding: '2px 8px',
+                        fontFamily: 'var(--mono)', fontSize: 10, cursor: 'pointer',
+                      }}
+                    >
+                      Restart now
+                    </button>
+                  )}
+                </span>
+              )
+            })()}
+          </div>
+        )}
       </Section>
     </div>
   )

@@ -4,31 +4,40 @@
   "description": "Infrastructure Glassplane — unified resource optimisation dashboard",
   "main": "electron/main.js",
   "scripts": {
-    "start":      "electron .",
-    "dev":        "concurrently \"npm run dev:frontend\" \"wait-on http://localhost:5173 && electron .\"",
+    "start":        "electron .",
+    "dev":          "concurrently \"npm run dev:frontend\" \"wait-on http://localhost:5173 && electron .\"",
     "dev:frontend": "cd frontend && npm run dev",
-    "build":      "bash build.sh",
-    "dist":       "electron-builder",
-    "dist:win":   "electron-builder --win",
-    "dist:mac":   "electron-builder --mac",
-    "dist:linux": "electron-builder --linux"
+    "build":        "bash build.sh",
+    "dist":         "electron-builder",
+    "dist:win":     "electron-builder --win",
+    "dist:mac":     "electron-builder --mac",
+    "dist:linux":   "electron-builder --linux",
+    "release":      "electron-builder --win --publish always"
   },
   "keywords": ["infrastructure", "dashboard", "vmware", "veeam", "hpe", "aruba"],
-  "author": "Your Org",
+  "author": "Milling78 <milling78@gmail.com>",
   "license": "MIT",
+  "dependencies": {
+    "electron-updater": "^6.3.9"
+  },
   "devDependencies": {
-    "concurrently":    "^8.2.2",
-    "electron":        "^30.0.0",
+    "concurrently":     "^8.2.2",
+    "electron":         "^30.0.0",
     "electron-builder": "^24.13.0",
-    "wait-on":         "^7.2.0"
+    "wait-on":          "^7.2.0"
   },
   "build": {
-    "appId":       "com.yourorg.infra-glassplane",
+    "appId":       "com.milling78.glassplane",
     "productName": "Infra Glassplane",
-    "copyright":   "Copyright © 2025 Your Org",
+    "copyright":   "Copyright © 2026 Milling78",
     "directories": {
       "output": "dist-electron",
       "buildResources": "build-resources"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "Milling78",
+      "repo": "GlassPlane"
     },
     "files": [
       "electron/**/*",
@@ -69,12 +78,14 @@
       "category": "Utility"
     },
     "nsis": {
-      "oneClick":           false,
+      "oneClick":                          false,
       "allowToChangeInstallationDirectory": true,
-      "installerIcon":      "build-resources/icon.ico",
-      "uninstallerIcon":    "build-resources/icon.ico",
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
+      "installerIcon":                     "build-resources/icon.ico",
+      "uninstallerIcon":                   "build-resources/icon.ico",
+      "createDesktopShortcut":             true,
+      "createStartMenuShortcut":           true,
+      "shortcutName":                      "Infra Glassplane",
+      "deleteAppDataOnUninstall":          false
     },
     "dmg": {
       "contents": [

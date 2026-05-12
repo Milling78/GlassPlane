@@ -10,7 +10,7 @@ from typing import Any
 import httpx
 
 from config import get_settings
-from models.schemas import Switch, SwitchPort, ArubaSummary, HealthStatus
+from models.schemas import Switch, SwitchPort, ArubaSummary, AccessPoint, WirelessSummary, HealthStatus
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +67,56 @@ def _fetch_switch_ports(client: httpx.Client, base_url: str, token: str, serial:
 def _map_status(status: str) -> HealthStatus:
     mapping = {"Up": HealthStatus.OK, "Down": HealthStatus.CRITICAL}
     return mapping.get(status, HealthStatus.UNKNOWN)
+
+
+def _fetch_aps(client: httpx.Client, base_url: str, token: str) -> list[dict]:
+    resp = client.get(
+        f"{base_url}/monitoring/v1/aps",
+        headers=_headers(token),
+        params={"limit": 1000, "offset": 0},
+    )
+    resp.raise_for_status()
+    return resp.json().get("aps", [])
+
+
+def fetch_aruba_wireless() -> WirelessSummary:
+    settings = get_settings()
+    with httpx.Client(base_url=settings.aruba_central_base_url, verify=False, timeout=30) as client:
+        token   = _get_access_token(client, settings)
+        raw_aps = _fetch_aps(client, settings.aruba_central_base_url, token)
+
+    aps: list[AccessPoint] = []
+    for ap in raw_aps:
+        radios = ap.get("radios", [])
+        ch_2g  = next((r.get("channel") for r in radios if r.get("band") == "2.4GHz"), None)
+        ch_5g  = next((r.get("channel") for r in radios if r.get("band") == "5GHz"),   None)
+        aps.append(AccessPoint(
+            ap_id=ap.get("serial", ""),
+            name=ap.get("name", ap.get("serial", "")),
+            model=ap.get("model", ""),
+            site=ap.get("site", ""),
+            group=ap.get("group_name", ""),
+            ip_address=ap.get("ip_address", ""),
+            status=_map_status(ap.get("status", "")),
+            client_count=int(ap.get("client_count", 0)),
+            uptime_seconds=int(ap.get("uptime", 0)),
+            radio_count=len(radios),
+            channel_2g=ch_2g,
+            channel_5g=ch_5g,
+        ))
+
+    online  = sum(1 for a in aps if a.status == HealthStatus.OK)
+    offline = len(aps) - online
+    overall = HealthStatus.CRITICAL if offline > 0 else HealthStatus.OK if aps else HealthStatus.UNKNOWN
+
+    return WirelessSummary(
+        ap_count=len(aps),
+        online_count=online,
+        offline_count=offline,
+        total_clients=sum(a.client_count for a in aps),
+        aps=sorted(aps, key=lambda a: (-a.client_count, a.name)),
+        status=overall,
+    )
 
 
 def fetch_aruba_summary() -> ArubaSummary:

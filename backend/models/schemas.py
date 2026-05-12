@@ -46,6 +46,39 @@ class ClusterSummary(BaseModel):
     status: HealthStatus
 
 
+class SnapshotDetail(BaseModel):
+    name: str
+    description: str
+    created_at: str
+    age_days: float
+    size_gb: Optional[float] = None
+    depth: int = 0          # nesting depth in snapshot tree
+
+
+class VMSnapshotSummary(BaseModel):
+    vm_id: str
+    vm_name: str
+    host: str
+    cluster: str
+    snapshot_count: int
+    oldest_days: float
+    newest_days: float
+    total_size_gb: Optional[float] = None
+    snapshots: list[SnapshotDetail]
+
+
+class ESXiHostDetail(BaseModel):
+    name: str
+    cluster: str = ""
+    cpu_total_mhz: int
+    cpu_used_mhz: int
+    cpu_util_pct: float
+    ram_total_mb: int
+    ram_used_mb: int
+    ram_util_pct: float
+    vm_count: int
+
+
 class VCenterSummary(BaseModel):
     clusters: list[ClusterSummary]
     vms: list[VMSummary]
@@ -80,6 +113,32 @@ class Switch(BaseModel):
     mem_util_pct: float
     status: HealthStatus
     ports: list[SwitchPort] = Field(default_factory=list)
+    ip: str = ""           # populated for directly-connected switches
+    source: str = "central"  # "central" | "direct"
+
+
+class AccessPoint(BaseModel):
+    ap_id: str
+    name: str
+    model: str
+    site: str
+    group: str
+    ip_address: str
+    status: HealthStatus
+    client_count: int
+    uptime_seconds: int
+    radio_count: int = 0
+    channel_2g: Optional[int] = None
+    channel_5g: Optional[int] = None
+
+
+class WirelessSummary(BaseModel):
+    ap_count: int
+    online_count: int
+    offline_count: int
+    total_clients: int
+    aps: list[AccessPoint]
+    status: HealthStatus
 
 
 class ArubaSummary(BaseModel):

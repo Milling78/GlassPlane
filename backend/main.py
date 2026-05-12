@@ -11,6 +11,7 @@ from routers.auth import auth_router
 from routers.setup import setup_router
 from routers.alerts import alerts_router
 from routers.history import history_router
+from routers.forecast import forecast_router
 from alerting.checker import alert_loop
 from history.snapshotter import snapshot_loop
 
@@ -62,6 +63,7 @@ app.include_router(glassplane_router, prefix="/api")
 app.include_router(surge_router, prefix="/api")
 app.include_router(ilo_router, prefix="/api")
 app.include_router(history_router, prefix="/api")
+app.include_router(forecast_router, prefix="/api")
 
 
 @app.get("/health")

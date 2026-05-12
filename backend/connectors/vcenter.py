@@ -5,13 +5,14 @@ Identifies idle VMs (avg CPU < 5%) and oversized VMs (alloc >> peak).
 
 import ssl
 import logging
+from datetime import datetime, timezone
 from typing import Optional
 
 from pyVim.connect import SmartConnect, Disconnect
 from pyVmomi import vim
 
 from config import get_settings
-from models.schemas import VMSummary, ClusterSummary, VCenterSummary, HealthStatus
+from models.schemas import VMSummary, ClusterSummary, VCenterSummary, ESXiHostDetail, SnapshotDetail, VMSnapshotSummary, HealthStatus
 
 logger = logging.getLogger(__name__)
 
@@ -188,5 +189,158 @@ def fetch_vcenter_summary() -> VCenterSummary:
             wasted_cpu_ghz=round(wasted_cpu, 2),
             wasted_ram_gb=round(wasted_ram, 1)
         )
+    finally:
+        Disconnect(si)
+
+
+def _age_days(dt: datetime) -> float:
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - dt).total_seconds() / 86400.0
+
+
+def _snapshot_size_map(vm) -> dict[str, int]:
+    """Return {snapshot_moref_id: size_bytes} using layoutEx delta-file data."""
+    try:
+        lex = vm.layoutEx
+        if not lex or not lex.snapshot:
+            return {}
+        files = lex.file or []
+        result = {}
+        for sl in lex.snapshot:
+            mo_id = sl.key._moId
+            size  = sum(files[k].size for k in (sl.dataKey or []) if k < len(files))
+            result[mo_id] = size
+        return result
+    except Exception:
+        return {}
+
+
+def _collect_snapshot_tree(snap_list, size_map: dict, depth: int = 0) -> list[SnapshotDetail]:
+    details: list[SnapshotDetail] = []
+    for snap in snap_list:
+        age  = _age_days(snap.createTime)
+        mo_id = snap.snapshot._moId
+        size_bytes = size_map.get(mo_id)
+        details.append(SnapshotDetail(
+            name=snap.name,
+            description=snap.description or "",
+            created_at=snap.createTime.isoformat(),
+            age_days=round(age, 1),
+            size_gb=round(size_bytes / (1024 ** 3), 2) if size_bytes is not None else None,
+            depth=depth,
+        ))
+        details.extend(_collect_snapshot_tree(snap.childSnapshotList, size_map, depth + 1))
+    return details
+
+
+def fetch_vm_snapshots() -> list[VMSnapshotSummary]:
+    """Return all VMs that have at least one snapshot, with per-snapshot detail."""
+    settings = get_settings()
+    ctx = _build_ssl_context()
+    si = SmartConnect(
+        host=settings.vcenter_host, user=settings.vcenter_user,
+        pwd=settings.vcenter_password, port=settings.vcenter_port, sslContext=ctx,
+    )
+    try:
+        content = si.content
+        vm_view = content.viewManager.CreateContainerView(
+            content.rootFolder, [vim.VirtualMachine], True
+        )
+        results: list[VMSnapshotSummary] = []
+        for vm in vm_view.view:
+            if vm.config is None or vm.snapshot is None:
+                continue
+
+            size_map = _snapshot_size_map(vm)
+            snaps    = _collect_snapshot_tree(vm.snapshot.rootSnapshotList, size_map)
+            if not snaps:
+                continue
+
+            ages      = [s.age_days for s in snaps]
+            sizes     = [s.size_gb for s in snaps if s.size_gb is not None]
+            total_gb  = round(sum(sizes), 2) if sizes else None
+
+            host_obj     = vm.summary.runtime.host
+            cluster_name = "standalone"
+            if host_obj and isinstance(host_obj.parent, vim.ClusterComputeResource):
+                cluster_name = host_obj.parent.name
+
+            results.append(VMSnapshotSummary(
+                vm_id=vm.config.uuid,
+                vm_name=vm.config.name,
+                host=host_obj.name if host_obj else "unknown",
+                cluster=cluster_name,
+                snapshot_count=len(snaps),
+                oldest_days=round(max(ages), 1),
+                newest_days=round(min(ages), 1),
+                total_size_gb=total_gb,
+                snapshots=snaps,
+            ))
+        vm_view.Destroy()
+        results.sort(key=lambda r: r.oldest_days, reverse=True)
+        return results
+    finally:
+        Disconnect(si)
+
+
+def fetch_vcenter_hosts() -> list[ESXiHostDetail]:
+    """Return per-ESXi-host hardware and utilisation metrics."""
+    settings = get_settings()
+    ctx = _build_ssl_context()
+
+    si = SmartConnect(
+        host=settings.vcenter_host,
+        user=settings.vcenter_user,
+        pwd=settings.vcenter_password,
+        port=settings.vcenter_port,
+        sslContext=ctx
+    )
+    try:
+        content = si.content
+
+        # Count powered-on VMs per ESXi host
+        vm_view = content.viewManager.CreateContainerView(
+            content.rootFolder, [vim.VirtualMachine], True
+        )
+        host_vm_count: dict[str, int] = {}
+        for vm in vm_view.view:
+            if vm.config and vm.summary.runtime.host:
+                hn = vm.summary.runtime.host.name
+                host_vm_count[hn] = host_vm_count.get(hn, 0) + 1
+        vm_view.Destroy()
+
+        host_view = content.viewManager.CreateContainerView(
+            content.rootFolder, [vim.HostSystem], True
+        )
+        results: list[ESXiHostDetail] = []
+        for host in host_view.view:
+            hw = host.summary.hardware
+            qs = host.summary.quickStats
+            if hw is None:
+                continue
+
+            total_mhz = hw.cpuMhz * hw.numCpuCores
+            used_mhz  = int(qs.overallCpuUsage or 0)
+            total_ram_mb = int(hw.memorySize // (1024 * 1024))
+            used_ram_mb  = int(qs.overallMemoryUsage or 0)
+
+            cluster_name = "standalone"
+            if isinstance(host.parent, vim.ClusterComputeResource):
+                cluster_name = host.parent.name
+
+            results.append(ESXiHostDetail(
+                name=host.name,
+                cluster=cluster_name,
+                cpu_total_mhz=total_mhz,
+                cpu_used_mhz=used_mhz,
+                cpu_util_pct=round(used_mhz / total_mhz * 100, 1) if total_mhz else 0.0,
+                ram_total_mb=total_ram_mb,
+                ram_used_mb=used_ram_mb,
+                ram_util_pct=round(used_ram_mb / total_ram_mb * 100, 1) if total_ram_mb else 0.0,
+                vm_count=host_vm_count.get(host.name, 0),
+            ))
+        host_view.Destroy()
+        return results
     finally:
         Disconnect(si)
