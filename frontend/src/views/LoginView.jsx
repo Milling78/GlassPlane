@@ -38,8 +38,22 @@ export default function LoginView({ onLogin }) {
           <div style={{ fontWeight: 600, fontSize: 16, color: 'var(--text)', marginBottom: 4 }}>
             Infra Glassplane
           </div>
-          <div style={{ fontSize: 12, color: 'var(--muted)', fontFamily: 'var(--mono)' }}>
-            Enter your Glassplane API key to connect to the local backend service
+          <div style={{ fontSize: 12, color: 'var(--muted)', fontFamily: 'var(--mono)', lineHeight: 1.6 }}>
+            Enter your Glassplane API key to connect to the local backend service.
+          </div>
+        </div>
+
+        <div style={{
+          background: 'var(--bg)', border: '0.5px solid var(--border)', borderRadius: 8,
+          padding: '0.75rem 1rem', fontSize: 11, color: 'var(--muted)', fontFamily: 'var(--mono)',
+          lineHeight: 1.7,
+        }}>
+          <div style={{ fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>First time? Here's how:</div>
+          <div>1. Open <code style={{ background: 'var(--surface)', padding: '1px 4px', borderRadius: 3 }}>%APPDATA%\Infra Glassplane\.env</code></div>
+          <div>2. Find the line <code style={{ background: 'var(--surface)', padding: '1px 4px', borderRadius: 3 }}>API_KEY=</code> and set a value</div>
+          <div>3. Restart the app and enter that value here</div>
+          <div style={{ marginTop: 6, color: 'var(--muted)' }}>
+            If <code style={{ background: 'var(--surface)', padding: '1px 4px', borderRadius: 3 }}>API_KEY=</code> is blank, type anything to connect.
           </div>
         </div>
 
