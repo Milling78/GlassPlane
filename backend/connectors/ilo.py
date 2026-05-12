@@ -68,15 +68,21 @@ def _fetch_host(host: str, user: str, password: str, port: int, ssl_verify: bool
             "Warning"  if "Warning"  in fan_healths else "OK"
         )
 
-        # ── IML — most recent non-OK entries ─────────────────────────────────
+        # ── IML — active (unrepaired) non-OK entries only ────────────────────
         recent_errors: list[str] = []
         try:
             log = _get(client, host, port, "/Systems/1/LogServices/IML/Entries/")
-            recent_errors = [
-                e.get("Message", "")
-                for e in (log.get("Members") or [])
-                if (e.get("Severity") or "OK") not in ("OK", "Informational")
-            ][:5]
+            for e in (log.get("Members") or []):
+                if (e.get("Severity") or "OK") in ("OK", "Informational"):
+                    continue
+                oem = e.get("Oem") or {}
+                # iLO 5 uses Hpe, older firmware uses Hp
+                hpe = oem.get("Hpe") or oem.get("Hp") or {}
+                if hpe.get("Repaired"):
+                    continue
+                recent_errors.append(e.get("Message", ""))
+                if len(recent_errors) >= 5:
+                    break
         except Exception:
             pass
 
