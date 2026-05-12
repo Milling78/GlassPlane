@@ -14,13 +14,15 @@ from security import verify_api_key
 from config import get_settings
 from models.schemas import (
     VCenterSummary, ArubaSummary, AlletraSummary, VeeamSummary,
-    GlassplaneSummary, HealthStatus, ESXiHostDetail, VMSnapshotSummary, WirelessSummary
+    GlassplaneSummary, HealthStatus, ESXiHostDetail, VMSnapshotSummary, WirelessSummary,
+    DNSSummary,
 )
 from connectors.vcenter import fetch_vcenter_summary, fetch_vcenter_hosts, fetch_vm_snapshots
 from connectors.aruba import fetch_aruba_summary, fetch_aruba_wireless
 from connectors.alletra import fetch_alletra_summary
 from connectors.veeam import fetch_veeam_summary
 from connectors.vcenter_perf import fetch_vm_surges, VMSurgeResult
+from connectors.dns import fetch_dns_summary
 from models.surge_schemas import SurgeSummarySchema, VMSurgeResultSchema, SurgeEventSchema, SurgePeriodSchema
 
 logger = logging.getLogger(__name__)
@@ -227,6 +229,21 @@ def get_ilo():
         return fetch_ilo_summary()
     except Exception as e:
         logger.error(f"iLO error: {e}", exc_info=True)
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+# ── DNS router ────────────────────────────────────────────────────────────────
+
+dns_router = APIRouter(prefix="/dns", tags=["DNS"], dependencies=[Depends(verify_api_key)])
+
+
+@dns_router.get("/", response_model=DNSSummary)
+@cached("dns")
+def get_dns():
+    try:
+        return fetch_dns_summary()
+    except Exception as e:
+        logger.error(f"DNS error: {e}", exc_info=True)
         raise HTTPException(status_code=502, detail=str(e))
 
 

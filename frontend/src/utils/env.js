@@ -70,5 +70,10 @@ export function buildEnvContent(cfg) {
     '',
     `ALERT_ILO_POWER_CAP_PCT=${cfg.alerts?.iloPowerCapPct ?? 90.0}`,
     `ALERT_ILO_ERROR_COUNT=${cfg.alerts?.iloErrorCount ?? 1}`,
+    '',
+    '# ── DNS monitoring ───────────────────────────────────────',
+    `DNS_SERVERS=${cfg.dns?.servers ?? ''}`,
+    `DNS_CHECK_HOSTS=${cfg.dns?.checkHosts ?? ''}`,
+    `DNS_TIMEOUT=${cfg.dns?.timeout ?? 5.0}`,
   ].join('\n')
 }

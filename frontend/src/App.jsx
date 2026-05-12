@@ -13,6 +13,7 @@ import HostsView from './views/HostsView'
 import SurgeView from './views/SurgeView'
 import EfficiencyView from './views/EfficiencyView'
 import SnapshotsView from './views/SnapshotsView'
+import DNSView from './views/DNSView'
 
 const NAV = [
   { id: 'summary',    label: 'Overview',     icon: 'ti-layout-dashboard' },
@@ -23,6 +24,7 @@ const NAV = [
   { id: 'alletra',    label: 'Storage',      icon: 'ti-database' },
   { id: 'veeam',      label: 'Backups',      icon: 'ti-cloud-upload' },
   { id: 'hosts',      label: 'Hosts / iLO',  icon: 'ti-cpu' },
+  { id: 'dns',        label: 'DNS',          icon: 'ti-world-www' },
   { id: 'efficiency', label: 'Perf/Watt',    icon: 'ti-bolt' },
   { id: 'alerts',     label: 'Alerts',       icon: 'ti-bell' },
 ]
@@ -38,7 +40,8 @@ export default function App() {
   const [view, setView] = useState('summary')
   const [summary, setSummary] = useState(null)
   const [history, setHistory] = useState([])
-  const [iloSummary, setIloSummary] = useState(null)
+  const [iloSummary,  setIloSummary]  = useState(null)
+  const [dnsSummary,  setDnsSummary]  = useState(null)
   const [forecast, setForecast] = useState(null)
   const [activeAlertCount, setActiveAlertCount] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -104,6 +107,16 @@ export default function App() {
     }
   }, [ready])
 
+  const refreshDns = useCallback(async () => {
+    if (!ready) return
+    try {
+      const d = await api.dns()
+      setDnsSummary(d)
+    } catch {
+      // DNS is optional — no servers configured is normal
+    }
+  }, [ready])
+
   const refreshAlertCount = useCallback(async () => {
     if (!ready) return
     try {
@@ -127,6 +140,7 @@ export default function App() {
   useEffect(() => { refresh() }, [refresh])
   useEffect(() => { refreshHistory() }, [refreshHistory])
   useEffect(() => { refreshIlo() }, [refreshIlo])
+  useEffect(() => { refreshDns() }, [refreshDns])
   useEffect(() => { refreshAlertCount() }, [refreshAlertCount])
   useEffect(() => { refreshForecast() }, [refreshForecast])
   useEffect(() => {
@@ -149,6 +163,11 @@ export default function App() {
     const t = setInterval(refreshForecast, 900_000) // 15 min — matches snapshot cadence
     return () => clearInterval(t)
   }, [refreshForecast, ready])
+  useEffect(() => {
+    if (!ready) return
+    const t = setInterval(refreshDns, 60_000)
+    return () => clearInterval(t)
+  }, [refreshDns, ready])
 
   // ── Gates (all hooks above this line) ─────────────────────────────────────
 
@@ -173,6 +192,7 @@ export default function App() {
     aruba:   summary?.aruba?.status,
     alletra: summary?.alletra?.status,
     veeam:   summary?.veeam?.status,
+    dns:     dnsSummary?.status,
   }
 
   return (
@@ -266,6 +286,7 @@ export default function App() {
                 {view === 'alletra'  && <AlletraView data={summary?.alletra} />}
                 {view === 'veeam'    && <VeeamView data={summary?.veeam} />}
                 {view === 'hosts'      && <HostsView data={iloSummary} history={history} />}
+                {view === 'dns'        && <DNSView data={dnsSummary} />}
                 {view === 'efficiency' && <EfficiencyView iloSummary={iloSummary} />}
                 {view === 'alerts'     && <AlertsView />}
                 {view === 'settings' && <SettingsView />}

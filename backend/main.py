@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import get_settings
-from routers.api import vcenter_router, aruba_router, alletra_router, veeam_router, glassplane_router, surge_router, ilo_router
+from routers.api import vcenter_router, aruba_router, alletra_router, veeam_router, glassplane_router, surge_router, ilo_router, dns_router
 from routers.auth import auth_router
 from routers.setup import setup_router
 from routers.alerts import alerts_router
@@ -64,6 +64,7 @@ app.include_router(surge_router, prefix="/api")
 app.include_router(ilo_router, prefix="/api")
 app.include_router(history_router, prefix="/api")
 app.include_router(forecast_router, prefix="/api")
+app.include_router(dns_router, prefix="/api")
 
 
 @app.get("/health")

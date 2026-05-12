@@ -84,6 +84,11 @@ class Settings(BaseSettings):
     alert_ilo_power_cap_pct: float = 90.0   # alert when power > X% of cap
     alert_ilo_error_count: int = 1          # alert when IML errors >= this
 
+    # DNS monitoring
+    dns_servers: str = ""         # comma-separated DNS server IPs to poll
+    dns_check_hosts: str = ""     # comma-separated hostnames to resolve
+    dns_timeout: float = 5.0      # per-query timeout in seconds
+
     # Historical snapshots
     snapshot_interval_seconds: int = 900   # 15 minutes
     snapshot_retention_days: int = 30

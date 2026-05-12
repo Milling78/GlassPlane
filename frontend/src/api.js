@@ -71,6 +71,7 @@ export const api = {
   ilo:           () => apiFetch('/api/ilo/'),
   veeamSessions: (days = 30) => apiFetch(`/api/veeam/sessions?days=${days}`),
   forecast:     () => apiFetch('/api/forecast/'),
+  dns:          () => apiFetch('/api/dns/'),
   alertStatus:  () => apiFetch('/api/alerts/status'),
   alertHistory: (limit = 100) => apiFetch(`/api/alerts/history?limit=${limit}`),
   alertCheck:   () => apiFetch('/api/alerts/check', { method: 'POST' }),

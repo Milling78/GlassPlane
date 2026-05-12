@@ -63,6 +63,11 @@ async def get_config():
         },
         "cacheTtl":  s.cache_ttl_seconds,
         "logLevel":  s.log_level,
+        "dns": {
+            "servers":    s.dns_servers,
+            "checkHosts": s.dns_check_hosts,
+            "timeout":    s.dns_timeout,
+        },
         "alerts": {
             "webhookUrl":             s.webhook_url,
             "webhookFormat":          s.webhook_format,

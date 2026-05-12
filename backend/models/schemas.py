@@ -209,6 +209,33 @@ class ILOSummary(BaseModel):
     status: HealthStatus
 
 
+# ── DNS ───────────────────────────────────────────────────────────────────────
+
+class DNSServerResult(BaseModel):
+    server: str
+    reachable: bool
+    response_ms: Optional[float] = None
+    error: str = ""
+    status: HealthStatus = HealthStatus.OK
+
+
+class DNSRecordResult(BaseModel):
+    hostname: str
+    resolved: bool
+    addresses: list[str] = []
+    response_ms: Optional[float] = None
+    error: str = ""
+
+
+class DNSSummary(BaseModel):
+    servers: list[DNSServerResult]
+    records: list[DNSRecordResult]
+    server_count: int
+    reachable_count: int
+    failed_records: int
+    status: HealthStatus
+
+
 # ── Veeam ─────────────────────────────────────────────────────────────────────
 
 class JobSession(BaseModel):

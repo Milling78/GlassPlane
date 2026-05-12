@@ -540,6 +540,29 @@ export default function SettingsView() {
         <Toggle label="Verify SSL certificate" checked={cfg.ilo?.sslVerify ?? false} onChange={v => u('ilo', 'sslVerify', v)} />
       </Section>
 
+      {/* DNS */}
+      <Section icon="ti-world-www" title="DNS Monitoring" iconColor="var(--c-blue)">
+        <Field
+          label="DNS SERVERS (comma-separated IPs)"
+          value={cfg.dns?.servers ?? ''}
+          onChange={v => u('dns', 'servers', v)}
+          placeholder="192.168.1.1, 192.168.1.2"
+        />
+        <Field
+          label="HOSTNAMES TO VERIFY (comma-separated)"
+          value={cfg.dns?.checkHosts ?? ''}
+          onChange={v => u('dns', 'checkHosts', v)}
+          placeholder="vcenter.local, ad.local, gateway.local"
+        />
+        <div style={{ flex: 1, maxWidth: 160 }}>
+          <Field
+            label="QUERY TIMEOUT (seconds)"
+            value={String(cfg.dns?.timeout ?? 5)}
+            onChange={v => u('dns', 'timeout', parseFloat(v) || 5)}
+          />
+        </div>
+      </Section>
+
       {/* App settings */}
       <Section icon="ti-adjustments-horizontal" title="App">
         <Row>
