@@ -9,6 +9,7 @@ import AlletraView from './views/AlletraView'
 import VeeamView from './views/VeeamView'
 import SettingsView from './views/SettingsView'
 import AlertsView from './views/AlertsView'
+import HostsView from './views/HostsView'
 import SurgeView from './views/SurgeView'
 
 const NAV = [
@@ -18,6 +19,7 @@ const NAV = [
   { id: 'aruba',    label: 'Networking',     icon: 'ti-network' },
   { id: 'alletra',  label: 'Storage',        icon: 'ti-database' },
   { id: 'veeam',    label: 'Backups',        icon: 'ti-cloud-upload' },
+  { id: 'hosts',    label: 'Hosts / iLO',    icon: 'ti-cpu' },
   { id: 'alerts',   label: 'Alerts',         icon: 'ti-bell' },
 ]
 
@@ -32,6 +34,7 @@ export default function App() {
   const [view, setView] = useState('summary')
   const [summary, setSummary] = useState(null)
   const [history, setHistory] = useState([])
+  const [iloSummary, setIloSummary] = useState(null)
   const [activeAlertCount, setActiveAlertCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [lastRefresh, setLastRefresh] = useState(null)
@@ -86,6 +89,16 @@ export default function App() {
     }
   }, [ready])
 
+  const refreshIlo = useCallback(async () => {
+    if (!ready) return
+    try {
+      const d = await api.ilo()
+      setIloSummary(d)
+    } catch {
+      // iLO is optional — no hosts configured is normal
+    }
+  }, [ready])
+
   const refreshAlertCount = useCallback(async () => {
     if (!ready) return
     try {
@@ -98,6 +111,7 @@ export default function App() {
 
   useEffect(() => { refresh() }, [refresh])
   useEffect(() => { refreshHistory() }, [refreshHistory])
+  useEffect(() => { refreshIlo() }, [refreshIlo])
   useEffect(() => { refreshAlertCount() }, [refreshAlertCount])
   useEffect(() => {
     if (!ready) return
@@ -223,12 +237,13 @@ export default function App() {
                 connecting to backend…
               </div>
             : <>
-                {view === 'summary'  && <GlassplaneView data={summary} history={history} onNavigate={setView} />}
+                {view === 'summary'  && <GlassplaneView data={summary} history={history} iloSummary={iloSummary} onNavigate={setView} />}
                 {view === 'vms'      && <VMsView vcenter={summary?.vcenter} />}
                 {view === 'surges'   && <SurgeView />}
                 {view === 'aruba'    && <ArubaView data={summary?.aruba} />}
                 {view === 'alletra'  && <AlletraView data={summary?.alletra} />}
                 {view === 'veeam'    && <VeeamView data={summary?.veeam} />}
+                {view === 'hosts'    && <HostsView data={iloSummary} history={history} />}
                 {view === 'alerts'   && <AlertsView />}
                 {view === 'settings' && <SettingsView />}
               </>

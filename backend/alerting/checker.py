@@ -110,6 +110,33 @@ def _evaluate(s) -> list[dict]:
         except Exception as e:
             logger.warning(f"Alert check — Veeam: {e}")
 
+    if s.ilo_hosts:
+        try:
+            from connectors.ilo import fetch_ilo_summary
+            ilo = fetch_ilo_summary()
+            for host in ilo.hosts:
+                if host.health.lower() == "critical":
+                    breaches.append({"key": f"ilo_health_{host.hostname}", "system": "iLO",
+                        "message": f"{host.hostname} hardware health is Critical",
+                        "severity": "critical"})
+                elif host.health.lower() == "warning":
+                    breaches.append({"key": f"ilo_health_{host.hostname}", "system": "iLO",
+                        "message": f"{host.hostname} hardware health is Warning",
+                        "severity": "warning"})
+                if host.power_watts and host.power_cap_watts and host.power_cap_watts > 0:
+                    pct = host.power_watts / host.power_cap_watts * 100
+                    if pct > s.alert_ilo_power_cap_pct:
+                        breaches.append({"key": f"ilo_power_{host.hostname}", "system": "iLO",
+                            "message": f"{host.hostname} power at {pct:.0f}% of cap ({host.power_watts:.0f}W / {host.power_cap_watts:.0f}W)",
+                            "severity": "warning"})
+            total_errors = sum(len(h.recent_errors) for h in ilo.hosts)
+            if total_errors >= s.alert_ilo_error_count:
+                breaches.append({"key": "ilo_iml_errors", "system": "iLO",
+                    "message": f"{total_errors} IML hardware error(s) across {ilo.host_count} host(s)",
+                    "severity": "critical"})
+        except Exception as e:
+            logger.warning(f"Alert check — iLO: {e}")
+
     return breaches
 
 

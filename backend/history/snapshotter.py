@@ -23,6 +23,7 @@ def _collect() -> dict:
         "ar_switches", "ar_unused", "ar_unused_pct",
         "al_util_pct", "al_used_tb", "al_free_tb", "al_iops", "al_latency", "al_efficiency",
         "veeam_jobs", "veeam_failed", "veeam_protected", "veeam_unprotected", "veeam_repo_pct",
+        "ilo_host_count", "ilo_total_power_w", "ilo_error_count",
     ]}
     row["ts"] = time.time()
 
@@ -67,6 +68,18 @@ def _collect() -> dict:
                        veeam_repo_pct=veeam.repo_util_pct)
         except Exception as e:
             logger.warning(f"Snapshot Veeam: {e}")
+
+    if s.ilo_hosts:
+        try:
+            from connectors.ilo import fetch_ilo_summary
+            ilo = fetch_ilo_summary()
+            row.update(
+                ilo_host_count=ilo.host_count,
+                ilo_total_power_w=ilo.total_power_watts,
+                ilo_error_count=ilo.error_count,
+            )
+        except Exception as e:
+            logger.warning(f"Snapshot iLO: {e}")
 
     try:
         score, _ = _optimization_score(vc, ar, al, veeam)

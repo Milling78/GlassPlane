@@ -383,6 +383,26 @@ export default function SettingsView() {
         />
       </Section>
 
+      {/* HPE iLO */}
+      <Section icon="ti-cpu" title="HPE iLO / Redfish" iconColor="var(--c-ok)">
+        <Field
+          label="HOSTS (comma-separated IPs or hostnames)"
+          value={cfg.ilo?.hosts ?? ''}
+          onChange={v => u('ilo', 'hosts', v)}
+          placeholder="ilo1.lab.local, ilo2.lab.local"
+        />
+        <Row>
+          <div style={{ flex: 2 }}>
+            <Field label="USERNAME" value={cfg.ilo?.user ?? ''} onChange={v => u('ilo', 'user', v)} placeholder="Administrator" />
+          </div>
+          <div style={{ flex: 1 }}>
+            <Field label="PORT" value={String(cfg.ilo?.port ?? 443)} onChange={v => u('ilo', 'port', parseInt(v) || 443)} />
+          </div>
+        </Row>
+        <Field label="PASSWORD" value={cfg.ilo?.password ?? ''} onChange={v => u('ilo', 'password', v)} type="password" />
+        <Toggle label="Verify SSL certificate" checked={cfg.ilo?.sslVerify ?? false} onChange={v => u('ilo', 'sslVerify', v)} />
+      </Section>
+
       {/* App settings */}
       <Section icon="ti-adjustments-horizontal" title="App">
         <Row>
@@ -488,6 +508,12 @@ export default function SettingsView() {
               <ThresholdField label="Failed jobs ≥" value={al.veeamFailedJobs} onChange={v => ua('veeamFailedJobs', v)} unit="jobs" min={1} />
               <ThresholdField label="Unprotected VMs ≥" value={al.veeamUnprotectedVms} onChange={v => ua('veeamUnprotectedVms', v)} unit="VMs" min={1} />
               <ThresholdField label="Repo util >" value={al.veeamRepoUtilPct} onChange={v => ua('veeamRepoUtilPct', v)} unit="%" min={0} step={5} />
+            </ThresholdGrid>
+
+            <SubHeading>iLO thresholds</SubHeading>
+            <ThresholdGrid>
+              <ThresholdField label="Power cap >" value={al.iloPowerCapPct ?? 90} onChange={v => ua('iloPowerCapPct', v)} unit="%" min={0} step={5} />
+              <ThresholdField label="IML errors ≥" value={al.iloErrorCount ?? 1} onChange={v => ua('iloErrorCount', v)} unit="errors" min={1} />
             </ThresholdGrid>
           </Section>
         )

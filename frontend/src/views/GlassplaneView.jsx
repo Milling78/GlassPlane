@@ -37,15 +37,16 @@ function ScoreRing({ score }) {
   )
 }
 
-export default function GlassplaneView({ data, history = [], onNavigate }) {
+export default function GlassplaneView({ data, history = [], iloSummary, onNavigate }) {
   if (!data) return null
   const { vcenter, aruba, alletra, veeam, optimization_score, top_recommendations, overall_status } = data
 
   const subsystems = [
-    { id: 'vms',     label: 'vCenter / Compute', icon: 'ti-server-2',    data: vcenter, status: vcenter ? 'ok' : 'unknown' },
-    { id: 'aruba',   label: 'Aruba Networking',  icon: 'ti-network',     data: aruba,   status: aruba?.status },
-    { id: 'alletra', label: 'HPE Alletra 6000',  icon: 'ti-database',    data: alletra, status: alletra?.status },
-    { id: 'veeam',   label: 'Veeam Backup',      icon: 'ti-cloud-upload', data: veeam,  status: veeam?.status },
+    { id: 'vms',     label: 'vCenter / Compute', icon: 'ti-server-2',    data: vcenter,    status: vcenter ? 'ok' : 'unknown' },
+    { id: 'aruba',   label: 'Aruba Networking',  icon: 'ti-network',     data: aruba,      status: aruba?.status },
+    { id: 'alletra', label: 'HPE Alletra 6000',  icon: 'ti-database',    data: alletra,    status: alletra?.status },
+    { id: 'veeam',   label: 'Veeam Backup',      icon: 'ti-cloud-upload', data: veeam,     status: veeam?.status },
+    { id: 'hosts',   label: 'Hosts / iLO',       icon: 'ti-cpu',         data: iloSummary, status: iloSummary?.status },
   ]
 
   return (
@@ -148,6 +149,21 @@ export default function GlassplaneView({ data, history = [], onNavigate }) {
                     <div style={{ marginTop: 10 }}>
                       <div style={{ fontSize: 10, color: 'var(--muted)', fontFamily: 'var(--mono)', marginBottom: 2 }}>utilisation % · 24h</div>
                       <Sparkline data={history.map(p => p.al_util_pct)} color="var(--c-blue)" height={28} />
+                    </div>
+                  )}
+                </>
+              )}
+              {s.id === 'hosts' && iloSummary && (
+                <>
+                  <div className="metrics" style={{ marginBottom: history.length > 1 ? 10 : 0 }}>
+                    <div className="metric"><div className="metric-label">hosts</div><div className="metric-val">{iloSummary.host_count}</div></div>
+                    <div className="metric"><div className="metric-label">total power</div><div className="metric-val">{iloSummary.total_power_watts} W</div></div>
+                    <div className="metric"><div className="metric-label">IML errors</div><div className="metric-val" style={{ color: iloSummary.error_count > 0 ? 'var(--c-crit)' : undefined }}>{iloSummary.error_count}</div></div>
+                  </div>
+                  {history.length > 1 && (
+                    <div>
+                      <div style={{ fontSize: 10, color: 'var(--muted)', fontFamily: 'var(--mono)', marginBottom: 2 }}>power (W) · 24h</div>
+                      <Sparkline data={history.map(p => p.ilo_total_power_w)} color="var(--c-blue)" height={28} />
                     </div>
                   )}
                 </>

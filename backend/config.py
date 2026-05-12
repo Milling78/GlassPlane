@@ -60,6 +60,17 @@ class Settings(BaseSettings):
     alert_veeam_unprotected_vms: int = 1
     alert_veeam_repo_util_pct: float = 80.0
 
+    # HPE iLO / Redfish
+    ilo_hosts: str = ""          # comma-separated hostnames/IPs
+    ilo_user: str = ""
+    ilo_password: str = ""
+    ilo_port: int = 443
+    ilo_ssl_verify: bool = False
+
+    # iLO alert thresholds
+    alert_ilo_power_cap_pct: float = 90.0   # alert when power > X% of cap
+    alert_ilo_error_count: int = 1          # alert when IML errors >= this
+
     # Historical snapshots
     snapshot_interval_seconds: int = 900   # 15 minutes
     snapshot_retention_days: int = 30

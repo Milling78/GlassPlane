@@ -165,6 +165,22 @@ def get_veeam_sessions(days: int = Query(default=30, ge=1, le=90)):
         raise HTTPException(status_code=502, detail=str(e))
 
 
+# ── iLO / Redfish router ─────────────────────────────────────────────────────
+
+ilo_router = APIRouter(prefix="/ilo", tags=["iLO"], dependencies=[Depends(verify_api_key)])
+
+
+@ilo_router.get("/")
+@cached("ilo")
+def get_ilo():
+    try:
+        from connectors.ilo import fetch_ilo_summary
+        return fetch_ilo_summary()
+    except Exception as e:
+        logger.error(f"iLO error: {e}", exc_info=True)
+        raise HTTPException(status_code=502, detail=str(e))
+
+
 # ── Unified glassplane router ─────────────────────────────────────────────────
 
 glassplane_router = APIRouter(prefix="/summary", tags=["Glassplane"], dependencies=[Depends(verify_api_key)])

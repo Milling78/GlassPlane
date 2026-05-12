@@ -125,6 +125,31 @@ class AlletraSummary(BaseModel):
     status: HealthStatus
 
 
+# ── HPE iLO / Redfish ─────────────────────────────────────────────────────────
+
+class ILOHostSummary(BaseModel):
+    hostname: str
+    model: str = ""
+    serial: str = ""
+    health: str = "OK"           # OK | Warning | Critical
+    power_state: str = "Unknown" # On | Off | Unknown
+    power_watts: Optional[float] = None
+    power_cap_watts: Optional[float] = None
+    cpu_temp_c: Optional[float] = None
+    ambient_temp_c: Optional[float] = None
+    fan_status: str = "OK"       # OK | Warning | Critical
+    recent_errors: list[str] = []
+    status: HealthStatus = HealthStatus.OK
+
+
+class ILOSummary(BaseModel):
+    hosts: list[ILOHostSummary]
+    total_power_watts: float
+    host_count: int
+    error_count: int
+    status: HealthStatus
+
+
 # ── Veeam ─────────────────────────────────────────────────────────────────────
 
 class JobSession(BaseModel):

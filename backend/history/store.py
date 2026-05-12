@@ -35,7 +35,10 @@ CREATE TABLE IF NOT EXISTS snapshots (
     veeam_failed  INTEGER,
     veeam_protected   INTEGER,
     veeam_unprotected INTEGER,
-    veeam_repo_pct    REAL
+    veeam_repo_pct    REAL,
+    ilo_host_count    INTEGER,
+    ilo_total_power_w REAL,
+    ilo_error_count   INTEGER
 );
 CREATE INDEX IF NOT EXISTS snapshots_ts ON snapshots(ts);
 """
@@ -46,6 +49,7 @@ _COLUMNS = [
     "ar_switches", "ar_unused", "ar_unused_pct",
     "al_util_pct", "al_used_tb", "al_free_tb", "al_iops", "al_latency", "al_efficiency",
     "veeam_jobs", "veeam_failed", "veeam_protected", "veeam_unprotected", "veeam_repo_pct",
+    "ilo_host_count", "ilo_total_power_w", "ilo_error_count",
 ]
 
 

@@ -20,6 +20,13 @@ export function buildEnvContent(cfg) {
     `ALLETRA_PASSWORD=${cfg.alletra.password}`,
     `ALLETRA_PORT=${cfg.alletra.port}`,
     '',
+    '# ── HPE iLO / Redfish ────────────────────────────────────',
+    `ILO_HOSTS=${cfg.ilo?.hosts ?? ''}`,
+    `ILO_USER=${cfg.ilo?.user ?? ''}`,
+    `ILO_PASSWORD=${cfg.ilo?.password ?? ''}`,
+    `ILO_PORT=${cfg.ilo?.port ?? 443}`,
+    `ILO_SSL_VERIFY=${cfg.ilo?.sslVerify ?? false}`,
+    '',
     '# ── Veeam Backup & Replication ────────────────────────────',
     `VEEAM_HOST=${cfg.veeam.host}`,
     `VEEAM_USER=${cfg.veeam.user}`,
@@ -52,5 +59,8 @@ export function buildEnvContent(cfg) {
     `ALERT_VEEAM_FAILED_JOBS=${cfg.alerts?.veeamFailedJobs ?? 1}`,
     `ALERT_VEEAM_UNPROTECTED_VMS=${cfg.alerts?.veeamUnprotectedVms ?? 1}`,
     `ALERT_VEEAM_REPO_UTIL_PCT=${cfg.alerts?.veeamRepoUtilPct ?? 80}`,
+    '',
+    `ALERT_ILO_POWER_CAP_PCT=${cfg.alerts?.iloPowerCapPct ?? 90.0}`,
+    `ALERT_ILO_ERROR_COUNT=${cfg.alerts?.iloErrorCount ?? 1}`,
   ].join('\n')
 }

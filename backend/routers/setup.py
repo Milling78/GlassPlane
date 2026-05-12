@@ -46,6 +46,13 @@ def get_config():
             "password": s.veeam_password,
             "port":     s.veeam_port,
         },
+        "ilo": {
+            "hosts":     s.ilo_hosts,
+            "user":      s.ilo_user,
+            "password":  s.ilo_password,
+            "port":      s.ilo_port,
+            "sslVerify": s.ilo_ssl_verify,
+        },
         "cacheTtl":  s.cache_ttl_seconds,
         "logLevel":  s.log_level,
         "alerts": {
@@ -62,6 +69,8 @@ def get_config():
             "veeamFailedJobs":        s.alert_veeam_failed_jobs,
             "veeamUnprotectedVms":    s.alert_veeam_unprotected_vms,
             "veeamRepoUtilPct":       s.alert_veeam_repo_util_pct,
+            "iloPowerCapPct":         s.alert_ilo_power_cap_pct,
+            "iloErrorCount":          s.alert_ilo_error_count,
         },
     }
 
