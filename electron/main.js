@@ -56,6 +56,7 @@ async function startBackend() {
   const bin = getBackendBinary()
 
   if (!bin) {
+    // Dev mode: run uvicorn from the backend source directory
     const backendDir = path.join(__dirname, '..', 'backend')
     backendProcess = spawn(
       process.platform === 'win32' ? 'python' : 'python3',
@@ -64,8 +65,25 @@ async function startBackend() {
     )
   } else {
     if (!fs.existsSync(bin)) throw new Error(`Backend binary not found: ${bin}`)
+
+    // Production: store .env and glassplane.db in %APPDATA%\Infra Glassplane
+    const userDataPath = app.getPath('userData')
+    fs.mkdirSync(userDataPath, { recursive: true })
+
+    // Copy .env.example on first run so setup wizard has a template
+    const envPath     = path.join(userDataPath, '.env')
+    const examplePath = path.join(process.resourcesPath, 'backend', '.env.example')
+    if (!fs.existsSync(envPath) && fs.existsSync(examplePath)) {
+      fs.copyFileSync(examplePath, envPath)
+    }
+
     backendProcess = spawn(bin, ['--host', '127.0.0.1', '--port', String(backendPort)], {
-      env: { ...process.env, PYTHONUNBUFFERED: '1' }
+      cwd: userDataPath,
+      env: {
+        ...process.env,
+        PYTHONUNBUFFERED:    '1',
+        GLASSPLANE_ENV_FILE: envPath,
+      },
     })
   }
 

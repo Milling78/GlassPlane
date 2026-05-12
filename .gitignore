@@ -40,6 +40,14 @@ desktop.ini
 *.swp
 *.swo
 
+# Generated icon assets — run scripts/make-icon.py to recreate
+build-resources/icon.ico
+build-resources/icon.png
+build-resources/icon.icns
+
+# SQLite history database
+*.db
+
 # Logs
 *.log
 npm-debug.log*

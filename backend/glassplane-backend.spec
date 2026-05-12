@@ -45,6 +45,13 @@ a = Analysis(
         # httpx / networking
         'httpx',
         'certifi',
+        # SSH (paramiko) for Aruba direct connector
+        'paramiko',
+        'paramiko.transport',
+        'paramiko.auth_handler',
+        'paramiko.channel',
+        'cryptography',
+        'cryptography.hazmat.primitives',
         # cachetools
         'cachetools',
     ],
@@ -60,6 +67,8 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
+_icon = str(root.parent / 'build-resources' / 'icon.ico')
+
 exe = EXE(
     pyz,
     a.scripts,
@@ -74,10 +83,11 @@ exe = EXE(
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=True,   # keep console for logging; set False to suppress terminal on Windows
+    console=False,  # no terminal window — Electron captures stdout/stderr via pipes
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=_icon if Path(_icon).exists() else None,
 )

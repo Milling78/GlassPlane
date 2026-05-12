@@ -7,8 +7,6 @@
     "start":        "electron .",
     "dev":          "concurrently \"npm run dev:frontend\" \"wait-on http://localhost:5173 && electron .\"",
     "dev:frontend": "cd frontend && npm run dev",
-    "build":        "bash build.sh",
-    "dist":         "electron-builder",
     "dist:win":     "electron-builder --win",
     "dist:mac":     "electron-builder --mac",
     "dist:linux":   "electron-builder --linux",
@@ -36,8 +34,8 @@
     },
     "publish": {
       "provider": "github",
-      "owner": "Milling78",
-      "repo": "GlassPlane"
+      "owner":    "Milling78",
+      "repo":     "GlassPlane"
     },
     "files": [
       "electron/**/*",
@@ -45,11 +43,6 @@
       "package.json"
     ],
     "extraResources": [
-      {
-        "from": "backend/dist/glassplane-backend",
-        "to":   "backend/glassplane-backend",
-        "filter": ["**/*"]
-      },
       {
         "from": "backend/.env.example",
         "to":   "backend/.env.example"
@@ -69,23 +62,41 @@
       "target":   [{ "target": "dmg", "arch": ["x64", "arm64"] }],
       "icon":     "build-resources/icon.icns",
       "category": "public.app-category.utilities",
-      "hardenedRuntime": true,
-      "gatekeeperAssess": false
+      "hardenedRuntime":   true,
+      "gatekeeperAssess":  false,
+      "extraResources": [
+        {
+          "from": "backend/dist/glassplane-backend",
+          "to":   "backend/glassplane-backend"
+        }
+      ]
     },
     "linux": {
       "target": [{ "target": "AppImage", "arch": ["x64"] }],
       "icon":   "build-resources/icon.png",
-      "category": "Utility"
+      "category": "Utility",
+      "extraResources": [
+        {
+          "from": "backend/dist/glassplane-backend",
+          "to":   "backend/glassplane-backend"
+        }
+      ]
     },
     "nsis": {
       "oneClick":                          false,
       "allowToChangeInstallationDirectory": true,
+      "perMachine":                        false,
       "installerIcon":                     "build-resources/icon.ico",
       "uninstallerIcon":                   "build-resources/icon.ico",
+      "installerHeaderIcon":               "build-resources/icon.ico",
       "createDesktopShortcut":             true,
       "createStartMenuShortcut":           true,
       "shortcutName":                      "Infra Glassplane",
-      "deleteAppDataOnUninstall":          false
+      "menuCategory":                      "Infra Tools",
+      "license":                           "LICENSE",
+      "deleteAppDataOnUninstall":          false,
+      "runAfterFinish":                    true,
+      "differentialPackage":               true
     },
     "dmg": {
       "contents": [

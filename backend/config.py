@@ -1,9 +1,14 @@
+import os
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
 
+# Electron main passes GLASSPLANE_ENV_FILE pointing to %APPDATA%\Infra Glassplane\.env
+# so the packaged binary stores config in the right place for all users on the machine.
+_ENV_FILE = os.environ.get("GLASSPLANE_ENV_FILE", ".env")
+
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(env_file=_ENV_FILE, env_file_encoding="utf-8", extra="ignore")
 
     # vCenter
     vcenter_host: str = ""
