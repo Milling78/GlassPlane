@@ -5,11 +5,12 @@ Reference: https://helpcenter.veeam.com/docs/backup/vbr_rest/overview.html
 """
 
 import logging
+from datetime import datetime, timezone, timedelta
 
 import httpx
 
 from config import get_settings
-from models.schemas import BackupJob, Repository, VeeamSummary, HealthStatus
+from models.schemas import BackupJob, JobSession, Repository, VeeamSummary, HealthStatus
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +104,41 @@ def _map_result(result: str) -> str:
         "Running": "Running",
     }
     return mapping.get(result, result)
+
+
+def _fetch_sessions(client: httpx.Client, settings, token: str, days: int) -> list[dict]:
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    resp = client.get(
+        f"{_base_url(settings)}/sessions",
+        headers=_headers(token),
+        params={"limit": 2000, "createdAfterFilter": since},
+    )
+    resp.raise_for_status()
+    return resp.json().get("data", [])
+
+
+def fetch_veeam_sessions(days: int = 30) -> list[JobSession]:
+    settings = get_settings()
+    with httpx.Client(verify=False, timeout=30) as client:
+        token = _get_token(client, settings)
+        raw = _fetch_sessions(client, settings, token, days)
+
+    sessions = []
+    for s in raw:
+        job_id   = s.get("jobId") or s.get("parentSessionId") or s.get("id", "")
+        job_name = s.get("jobName") or s.get("name", "").split("|")[0].strip()
+        stats    = s.get("statistics") or {}
+        duration = stats.get("totalDuration") if isinstance(stats, dict) else None
+        sessions.append(JobSession(
+            session_id=s.get("id", ""),
+            job_id=job_id,
+            job_name=job_name,
+            result=_map_result(s.get("result", "None")),
+            start_time=s.get("creationTime"),
+            end_time=s.get("endTime"),
+            duration_seconds=int(duration) if duration is not None else None,
+        ))
+    return sessions
 
 
 def fetch_veeam_summary() -> VeeamSummary:

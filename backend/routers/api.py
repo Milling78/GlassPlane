@@ -8,7 +8,7 @@ from functools import wraps
 from time import time
 from typing import Callable, Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from security import verify_api_key
 
 from config import get_settings
@@ -151,6 +151,17 @@ def get_veeam():
         return fetch_veeam_summary()
     except Exception as e:
         logger.error(f"Veeam error: {e}", exc_info=True)
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@veeam_router.get("/sessions")
+def get_veeam_sessions(days: int = Query(default=30, ge=1, le=90)):
+    try:
+        from connectors.veeam import fetch_veeam_sessions
+        sessions = fetch_veeam_sessions(days)
+        return {"sessions": [s.model_dump() for s in sessions], "days": days}
+    except Exception as e:
+        logger.error(f"Veeam sessions error: {e}", exc_info=True)
         raise HTTPException(status_code=502, detail=str(e))
 
 

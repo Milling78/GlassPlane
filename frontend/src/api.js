@@ -64,6 +64,7 @@ export const api = {
     return apiFetch(`/api/vcenter/surges${q ? '?' + q : ''}`)
   },
   history:  (hours = 24) => apiFetch(`/api/history?hours=${hours}`),
+  veeamSessions: (days = 30) => apiFetch(`/api/veeam/sessions?days=${days}`),
   alertStatus:  () => apiFetch('/api/alerts/status'),
   alertHistory: (limit = 100) => apiFetch(`/api/alerts/history?limit=${limit}`),
   alertCheck:   () => apiFetch('/api/alerts/check', { method: 'POST' }),

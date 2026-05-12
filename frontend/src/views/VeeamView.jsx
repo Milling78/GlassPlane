@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { api } from '../api'
 import Sparkline from '../components/Sparkline'
+import JobStreakHeatmap from '../components/JobStreakHeatmap'
 
 const STATUS_CLS = { Success: 'b-on', Warning: 'b-idle', Failed: 'b-oversized', Running: 'b-off', None: 'b-off' }
 
@@ -27,10 +28,21 @@ function TrendRow({ label, data, color, unit = '' }) {
 export default function VeeamView({ data }) {
   const [hours, setHours] = useState(24)
   const [history, setHistory] = useState([])
+  const [sessionDays, setSessionDays] = useState(30)
+  const [sessions, setSessions] = useState([])
+  const [sessionsLoading, setSessionsLoading] = useState(true)
 
   useEffect(() => {
     api.history(hours).then(d => setHistory(d.points ?? [])).catch(() => setHistory([]))
   }, [hours])
+
+  useEffect(() => {
+    setSessionsLoading(true)
+    api.veeamSessions(sessionDays)
+      .then(d => setSessions(d.sessions ?? []))
+      .catch(() => setSessions([]))
+      .finally(() => setSessionsLoading(false))
+  }, [sessionDays])
 
   if (!data) return <div style={{ padding: '3rem', textAlign: 'center', fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--muted)' }}>no Veeam data</div>
   return (
@@ -69,6 +81,37 @@ export default function VeeamView({ data }) {
                 <TrendRow label="repo utilisation %" data={history.map(p => p.veeam_repo_pct)} color="var(--c-blue)" unit="%" />
                 <TrendRow label="protected VMs" data={history.map(p => p.veeam_protected)} color="var(--c-green)" />
               </>
+          }
+        </div>
+      </div>
+
+      {/* Job run streak */}
+      <div className="card" style={{ marginBottom: '1rem' }}>
+        <div className="card-header">
+          <div className="card-title">
+            <i className="ti ti-calendar-stats" style={{ color: 'var(--c-blue)' }} aria-hidden="true" />
+            Job run history
+          </div>
+          <div style={{ display: 'flex', gap: 4 }}>
+            {[7, 14, 30].map(d => (
+              <button
+                key={d}
+                onClick={() => setSessionDays(d)}
+                style={{
+                  fontSize: 11, fontFamily: 'var(--mono)', padding: '2px 8px',
+                  borderRadius: 4, border: '0.5px solid var(--border)',
+                  background: sessionDays === d ? 'var(--c-blue)' : 'transparent',
+                  color: sessionDays === d ? '#fff' : 'var(--muted)',
+                  cursor: 'pointer',
+                }}
+              >{d}d</button>
+            ))}
+          </div>
+        </div>
+        <div className="card-body">
+          {sessionsLoading
+            ? <div style={{ fontSize: 12, color: 'var(--muted)', fontFamily: 'var(--mono)' }}>loading sessions…</div>
+            : <JobStreakHeatmap sessions={sessions} days={sessionDays} />
           }
         </div>
       </div>

@@ -127,6 +127,16 @@ class AlletraSummary(BaseModel):
 
 # ── Veeam ─────────────────────────────────────────────────────────────────────
 
+class JobSession(BaseModel):
+    session_id: str
+    job_id: str
+    job_name: str
+    result: str                         # Success | Warning | Failed | None
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
+    duration_seconds: Optional[int] = None
+
+
 class BackupJob(BaseModel):
     job_id: str
     name: str
