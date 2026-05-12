@@ -22,7 +22,7 @@ function findFreePort(start = 8000) {
   })
 }
 
-function waitForBackend(port, retries = 40, delayMs = 500) {
+function waitForBackend(port, retries = 80, delayMs = 500) {
   return new Promise((resolve, reject) => {
     const http = require('http')
     let attempts = 0
