@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { api, auth } from './api'
+import { api, auth, getBaseUrl } from './api'
 import LoginView from './views/LoginView'
+import SetupView from './views/SetupView'
 import GlassplaneView from './views/GlassplaneView'
 import VMsView from './views/VMsView'
 import ArubaView from './views/ArubaView'
@@ -25,12 +26,27 @@ function StatusDot({ status }) {
 }
 
 export default function App() {
+  const [setupNeeded, setSetupNeeded] = useState(null) // null=checking, true=show setup, false=skip
   const [apiKey, setApiKey] = useState(() => auth.getKey())
   const [view, setView] = useState('summary')
   const [summary, setSummary] = useState(null)
   const [loading, setLoading] = useState(true)
   const [lastRefresh, setLastRefresh] = useState(null)
   const [error, setError] = useState(null)
+
+  useEffect(() => {
+    async function checkSetup() {
+      try {
+        const base = await getBaseUrl()
+        const res = await fetch(`${base}/setup/status`, { signal: AbortSignal.timeout(5000) })
+        const data = await res.json()
+        setSetupNeeded(data.needs_setup)
+      } catch {
+        setSetupNeeded(false) // backend unreachable — skip setup gate
+      }
+    }
+    checkSetup()
+  }, [])
 
   useEffect(() => {
     function onUnauthorized() {
@@ -41,11 +57,10 @@ export default function App() {
     return () => window.removeEventListener('glassplane:unauthorized', onUnauthorized)
   }, [])
 
-  if (!apiKey) {
-    return <LoginView onLogin={key => setApiKey(key)} />
-  }
+  const ready = setupNeeded === false && !!apiKey
 
   const refresh = useCallback(async () => {
+    if (!ready) return
     try {
       setError(null)
       const data = await api.summary()
@@ -56,13 +71,32 @@ export default function App() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [ready])
 
   useEffect(() => { refresh() }, [refresh])
   useEffect(() => {
+    if (!ready) return
     const t = setInterval(refresh, 60_000)
     return () => clearInterval(t)
-  }, [refresh])
+  }, [refresh, ready])
+
+  // ── Gates (all hooks above this line) ─────────────────────────────────────
+
+  if (setupNeeded === null) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: 'var(--bg)', fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--muted)' }}>
+        starting…
+      </div>
+    )
+  }
+
+  if (setupNeeded) {
+    return <SetupView onComplete={() => setSetupNeeded(false)} />
+  }
+
+  if (!apiKey) {
+    return <LoginView onLogin={key => setApiKey(key)} />
+  }
 
   const subsystemStatus = {
     vms:     summary?.vcenter ? 'ok' : 'unknown',

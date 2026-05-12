@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from config import get_settings
 from routers.api import vcenter_router, aruba_router, alletra_router, veeam_router, glassplane_router, surge_router
 from routers.auth import auth_router
+from routers.setup import setup_router
 
 settings = get_settings()
 logging.basicConfig(level=settings.log_level)
@@ -37,6 +38,7 @@ app.add_middleware(
 )
 
 app.include_router(auth_router)
+app.include_router(setup_router)
 app.include_router(vcenter_router, prefix="/api")
 app.include_router(aruba_router, prefix="/api")
 app.include_router(alletra_router, prefix="/api")

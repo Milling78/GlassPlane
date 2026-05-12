@@ -179,6 +179,19 @@ ipcMain.handle('show-error', async (_, msg) => {
   await dialog.showErrorBox('Glassplane error', msg)
 })
 
+ipcMain.handle('write-env', async (_, content) => {
+  const envPath = isDev
+    ? path.join(__dirname, '..', 'backend', '.env')
+    : path.join(app.getPath('userData'), '.env')
+  fs.writeFileSync(envPath, content, 'utf8')
+  return envPath
+})
+
+ipcMain.handle('relaunch-app', () => {
+  app.relaunch()
+  app.exit(0)
+})
+
 // ── App lifecycle ─────────────────────────────────────────────────────────────
 
 app.whenReady().then(async () => {
