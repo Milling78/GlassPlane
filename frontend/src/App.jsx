@@ -14,6 +14,7 @@ import SurgeView from './views/SurgeView'
 import EfficiencyView from './views/EfficiencyView'
 import SnapshotsView from './views/SnapshotsView'
 import DNSView from './views/DNSView'
+import LogsView from './views/LogsView'
 
 const NAV = [
   { id: 'summary',    label: 'Overview',     icon: 'ti-layout-dashboard' },
@@ -27,6 +28,7 @@ const NAV = [
   { id: 'dns',        label: 'DNS',          icon: 'ti-world-www' },
   { id: 'efficiency', label: 'Perf/Watt',    icon: 'ti-bolt' },
   { id: 'alerts',     label: 'Alerts',       icon: 'ti-bell' },
+  { id: 'logs',       label: 'Logs',         icon: 'ti-terminal-2' },
 ]
 
 function StatusDot({ status }) {
@@ -289,6 +291,7 @@ export default function App() {
                 {view === 'dns'        && <DNSView data={dnsSummary} />}
                 {view === 'efficiency' && <EfficiencyView iloSummary={iloSummary} />}
                 {view === 'alerts'     && <AlertsView />}
+                {view === 'logs'       && <LogsView />}
                 {view === 'settings' && <SettingsView />}
               </>
           }

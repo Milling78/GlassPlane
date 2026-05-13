@@ -12,11 +12,14 @@ from routers.setup import setup_router
 from routers.alerts import alerts_router
 from routers.history import history_router
 from routers.forecast import forecast_router
+from routers.logs import logs_router
 from alerting.checker import alert_loop
 from history.snapshotter import snapshot_loop
+import log_buffer
 
 settings = get_settings()
 logging.basicConfig(level=settings.log_level)
+log_buffer.install()
 logger = logging.getLogger(__name__)
 
 
@@ -65,6 +68,7 @@ app.include_router(ilo_router, prefix="/api")
 app.include_router(history_router, prefix="/api")
 app.include_router(forecast_router, prefix="/api")
 app.include_router(dns_router, prefix="/api")
+app.include_router(logs_router, prefix="/api")
 
 
 @app.get("/health")

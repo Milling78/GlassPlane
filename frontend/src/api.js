@@ -72,6 +72,8 @@ export const api = {
   veeamSessions: (days = 30) => apiFetch(`/api/veeam/sessions?days=${days}`),
   forecast:     () => apiFetch('/api/forecast/'),
   dns:          () => apiFetch('/api/dns/'),
+  logs:         (level, limit = 200) => apiFetch(`/api/logs/?${new URLSearchParams({ ...(level && level !== 'ALL' ? { level } : {}), limit })}`),
+  clearLogs:    () => apiFetch('/api/logs/', { method: 'DELETE' }),
   alertStatus:  () => apiFetch('/api/alerts/status'),
   alertHistory: (limit = 100) => apiFetch(`/api/alerts/history?limit=${limit}`),
   alertCheck:   () => apiFetch('/api/alerts/check', { method: 'POST' }),
