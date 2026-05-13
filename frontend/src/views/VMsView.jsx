@@ -89,6 +89,7 @@ const FLAG_COLORS = {
 export default function VMsView({ vcenter }) {
   const [vms, setVms] = useState(vcenter?.vms ?? [])
   const [loading, setLoading] = useState(!vcenter?.vms?.length)
+  const [fetchErr, setFetchErr] = useState(null)
   const [search, setSearch] = useState('')
   const [clusterFilter, setClusterFilter] = useState('all')
   const [hostFilter, setHostFilter] = useState('all')
@@ -101,9 +102,12 @@ export default function VMsView({ vcenter }) {
   const [showReport, setShowReport] = useState(false)
 
   useEffect(() => {
-    if (vcenter?.vms?.length) { setVms(vcenter.vms); return }
+    if (vcenter?.vms?.length) { setVms(vcenter.vms); setFetchErr(null); return }
     setLoading(true)
-    api.vcenter().then(d => { setVms(d.vms ?? []); setLoading(false) }).catch(() => setLoading(false))
+    setFetchErr(null)
+    api.vcenter()
+      .then(d => { setVms(d.vms ?? []); setLoading(false) })
+      .catch(e => { setFetchErr(e.message); setLoading(false) })
   }, [vcenter])
 
   const clusters = useMemo(() => ['all', ...new Set(vms.map(v => v.cluster))], [vms])
@@ -181,6 +185,15 @@ export default function VMsView({ vcenter }) {
   const wastedCpu      = vms.filter(v => v.is_oversized).reduce((s,v) => s + (v.cpu_allocated_mhz - v.cpu_used_mhz)/1000, 0).toFixed(1)
 
   if (loading) return <div style={{ padding: '3rem', textAlign: 'center', fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--muted)' }}>loading VMs…</div>
+
+  if (fetchErr) return (
+    <div style={{ padding: '2rem', maxWidth: 520 }}>
+      <div style={{ background: '#fee2e2', border: '0.5px solid #fca5a5', borderRadius: 8, padding: '0.75rem 1rem', fontFamily: 'var(--mono)', fontSize: 12, color: '#991b1b' }}>
+        <i className="ti ti-alert-circle" style={{ marginRight: 6 }} aria-hidden="true" />
+        Could not load VMs: {fetchErr}
+      </div>
+    </div>
+  )
 
   return (
     <>

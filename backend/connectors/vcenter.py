@@ -32,33 +32,38 @@ def _get_perf_manager(si):
     return si.content.perfManager
 
 
-def _query_vm_cpu_avg(perf_mgr, vm) -> Optional[float]:
-    """Return average CPU usage % over the last hour (sampled at 20s intervals)."""
-    try:
-        metric_id = vim.PerformanceManager.MetricId(
-            counterId=_find_counter_id(perf_mgr, "cpu", "usage", "average"),
-            instance=""
-        )
-        spec = vim.PerformanceManager.QuerySpec(
-            maxSample=180,  # 1 hour at 20s
-            entity=vm,
-            metricId=[metric_id],
-            intervalId=20
-        )
-        result = perf_mgr.QueryPerf(querySpec=[spec])
-        if result and result[0].value:
-            vals = [v.value[0] / 100.0 for v in result[0].value if v.value]
-            return sum(vals) / len(vals) if vals else None
-    except Exception as e:
-        logger.debug(f"Perf query failed for {vm.name}: {e}")
-    return None
-
-
 def _find_counter_id(perf_mgr, group: str, name: str, rollup: str) -> int:
     for c in perf_mgr.perfCounter:
         if c.groupInfo.key == group and c.nameInfo.key == name and c.rollupType == rollup:
             return c.key
     raise ValueError(f"Counter {group}/{name}/{rollup} not found")
+
+
+def _batch_cpu_avg(perf_mgr, vms: list) -> dict:
+    """Single QueryPerf call covering all VMs. Returns {vim.VirtualMachine: avg_cpu_pct}."""
+    if not vms:
+        return {}
+    try:
+        counter_id = _find_counter_id(perf_mgr, "cpu", "usage", "average")
+        metric_id  = vim.PerformanceManager.MetricId(counterId=counter_id, instance="")
+        specs = [
+            vim.PerformanceManager.QuerySpec(
+                maxSample=180, entity=vm, metricId=[metric_id], intervalId=20
+            )
+            for vm in vms
+        ]
+        results = perf_mgr.QueryPerf(querySpec=specs)
+        out: dict = {}
+        for r in results:
+            vals = []
+            for series in r.value:
+                vals.extend(v / 100.0 for v in series.value if v is not None)
+            if vals:
+                out[r.entity] = sum(vals) / len(vals)
+        return out
+    except Exception as e:
+        logger.warning(f"Batch perf query failed: {e}")
+        return {}
 
 
 def fetch_vcenter_summary() -> VCenterSummary:
@@ -86,11 +91,12 @@ def fetch_vcenter_summary() -> VCenterSummary:
         raw_vms = container.view
         container.Destroy()
 
-        vms: list[VMSummary] = []
-        for vm in raw_vms:
-            if vm.config is None:
-                continue
+        # Filter VMs with valid config, then fetch all perf data in one batch call
+        valid_vms = [vm for vm in raw_vms if vm.config is not None]
+        avg_cpu_map = _batch_cpu_avg(perf_mgr, valid_vms)
 
+        vms: list[VMSummary] = []
+        for vm in valid_vms:
             summary = vm.summary
             config = summary.config
             runtime = summary.runtime
@@ -106,7 +112,7 @@ def fetch_vcenter_summary() -> VCenterSummary:
             cpu_util = (cpu_used_mhz / cpu_alloc_mhz * 100) if cpu_alloc_mhz else 0
             ram_util = (ram_used_mb / ram_alloc_mb * 100) if ram_alloc_mb else 0
 
-            avg_cpu = _query_vm_cpu_avg(perf_mgr, vm)
+            avg_cpu = avg_cpu_map.get(vm)
             is_idle = (avg_cpu is not None and avg_cpu < IDLE_CPU_THRESHOLD_PCT) \
                       or (cpu_util < IDLE_CPU_THRESHOLD_PCT)
             is_oversized = cpu_util < OVERSIZED_CPU_THRESHOLD_PCT \
