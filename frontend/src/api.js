@@ -38,7 +38,7 @@ export async function apiFetch(path, options = {}) {
   const res = await fetch(`${base}${path}`, {
     ...options,
     headers,
-    signal: options.signal ?? AbortSignal.timeout(15000),
+    signal: options.signal ?? AbortSignal.timeout(45000),
   })
 
   if (res.status === 401) {

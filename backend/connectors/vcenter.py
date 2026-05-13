@@ -1,6 +1,7 @@
 """
 vCenter connector — uses pyVmomi to pull compute utilisation data.
-Identifies idle VMs (avg CPU < 5%) and oversized VMs (alloc >> peak).
+Uses the property collector API to bulk-fetch all VM and host properties
+in a handful of RPCs rather than one per object per property.
 """
 
 import ssl
@@ -9,17 +10,24 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from pyVim.connect import SmartConnect, Disconnect
-from pyVmomi import vim
+from pyVmomi import vim, vmodl
 
 from config import get_settings
-from models.schemas import VMSummary, ClusterSummary, VCenterSummary, ESXiHostDetail, SnapshotDetail, VMSnapshotSummary, HealthStatus
+from models.schemas import (
+    VMSummary, ClusterSummary, VCenterSummary,
+    ESXiHostDetail, SnapshotDetail, VMSnapshotSummary, HealthStatus,
+)
 
 logger = logging.getLogger(__name__)
 
-IDLE_CPU_THRESHOLD_PCT = 5.0        # VM avg CPU% below this = idle
-OVERSIZED_CPU_THRESHOLD_PCT = 20.0  # VM peak CPU% below this = oversized
-OVERSIZED_RAM_THRESHOLD_PCT = 40.0  # VM peak RAM% below this = oversized
+IDLE_CPU_THRESHOLD_PCT      = 5.0
+OVERSIZED_CPU_THRESHOLD_PCT = 20.0
+OVERSIZED_RAM_THRESHOLD_PCT = 40.0
+PERF_BATCH                  = 64   # max QuerySpec per QueryPerf call
+PERF_SAMPLES                = 60   # 60 × 20s = 20-min rolling avg (sufficient for idle detection)
 
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _build_ssl_context() -> ssl.SSLContext:
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
@@ -28,112 +36,173 @@ def _build_ssl_context() -> ssl.SSLContext:
     return ctx
 
 
-def _get_perf_manager(si):
-    return si.content.perfManager
+_counter_id_cache: dict[tuple, int] = {}
 
 
 def _find_counter_id(perf_mgr, group: str, name: str, rollup: str) -> int:
+    key = (group, name, rollup)
+    if key in _counter_id_cache:
+        return _counter_id_cache[key]
     for c in perf_mgr.perfCounter:
         if c.groupInfo.key == group and c.nameInfo.key == name and c.rollupType == rollup:
+            _counter_id_cache[key] = c.key
             return c.key
     raise ValueError(f"Counter {group}/{name}/{rollup} not found")
 
 
-def _batch_cpu_avg(perf_mgr, vms: list) -> dict:
-    """Single QueryPerf call covering all VMs. Returns {vim.VirtualMachine: avg_cpu_pct}."""
-    if not vms:
+def _collect_properties(content, obj_type, paths: list[str]) -> dict:
+    """
+    Fetch the given property paths for all objects of obj_type in a single
+    RetrieveProperties RPC.  Returns {ManagedObject: {path: value}}.
+    """
+    view = content.viewManager.CreateContainerView(content.rootFolder, [obj_type], True)
+    refs = list(view.view)
+    view.Destroy()
+    if not refs:
+        return {}
+
+    obj_specs = [
+        vmodl.query.PropertyCollector.ObjectSpec(obj=r, skip=False)
+        for r in refs
+    ]
+    prop_spec = vmodl.query.PropertyCollector.PropertySpec(
+        type=obj_type, all=False, pathSet=paths,
+    )
+    filter_spec = vmodl.query.PropertyCollector.FilterSpec(
+        objectSet=obj_specs, propSet=[prop_spec],
+    )
+    results = content.propertyCollector.RetrieveProperties(specSet=[filter_spec])
+    return {
+        oc.obj: {p.name: p.val for p in (oc.propSet or [])}
+        for oc in (results or [])
+    }
+
+
+def _batch_cpu_avg(perf_mgr, vm_refs: list) -> dict:
+    """
+    Fetch 1-hour average CPU% for every VM in a single (chunked) QueryPerf call.
+    Returns {vm_ref: avg_pct}.
+    """
+    if not vm_refs:
         return {}
     try:
         counter_id = _find_counter_id(perf_mgr, "cpu", "usage", "average")
         metric_id  = vim.PerformanceManager.MetricId(counterId=counter_id, instance="")
-        specs = [
-            vim.PerformanceManager.QuerySpec(
-                maxSample=180, entity=vm, metricId=[metric_id], intervalId=20
-            )
-            for vm in vms
-        ]
-        results = perf_mgr.QueryPerf(querySpec=specs)
-        out: dict = {}
-        for r in results:
-            vals = []
-            for series in r.value:
-                vals.extend(v / 100.0 for v in series.value if v is not None)
-            if vals:
-                out[r.entity] = sum(vals) / len(vals)
-        return out
     except Exception as e:
-        logger.warning(f"Batch perf query failed: {e}")
+        logger.warning(f"CPU counter lookup failed: {e}")
         return {}
 
+    out: dict = {}
+    for i in range(0, len(vm_refs), PERF_BATCH):
+        chunk = vm_refs[i:i + PERF_BATCH]
+        specs = [
+            vim.PerformanceManager.QuerySpec(
+                maxSample=PERF_SAMPLES, entity=vm, metricId=[metric_id], intervalId=20,
+            )
+            for vm in chunk
+        ]
+        try:
+            for r in perf_mgr.QueryPerf(querySpec=specs):
+                vals = [v / 100.0 for series in r.value for v in series.value if v is not None]
+                if vals:
+                    out[r.entity] = sum(vals) / len(vals)
+        except Exception as e:
+            logger.warning(f"QueryPerf chunk {i}-{i + PERF_BATCH} failed: {e}")
+    return out
+
+
+# ── Main fetch ────────────────────────────────────────────────────────────────
 
 def fetch_vcenter_summary() -> VCenterSummary:
-    settings = get_settings()
+    s   = get_settings()
     ctx = _build_ssl_context()
+    logger.info(f"Connecting to vCenter at {s.vcenter_host}")
 
-    logger.info(f"Connecting to vCenter at {settings.vcenter_host}")
     si = SmartConnect(
-        host=settings.vcenter_host,
-        user=settings.vcenter_user,
-        pwd=settings.vcenter_password,
-        port=settings.vcenter_port,
-        sslContext=ctx
+        host=s.vcenter_host, user=s.vcenter_user,
+        pwd=s.vcenter_password, port=s.vcenter_port, sslContext=ctx,
     )
-
     try:
-        content = si.content
-        perf_mgr = _get_perf_manager(si)
+        content  = si.content
+        perf_mgr = content.perfManager
 
-        container = content.viewManager.CreateContainerView(
-            content.rootFolder,
-            [vim.VirtualMachine],
-            True
-        )
-        raw_vms = container.view
-        container.Destroy()
+        # ── 1. Bulk-fetch all VM properties (1 RPC) ───────────────────────
+        vm_props = _collect_properties(content, vim.VirtualMachine, [
+            "config.uuid", "config.name", "config.numCpu",
+            "config.cpuAllocation", "config.memorySizeMB",
+            "summary.runtime.powerState", "summary.runtime.host",
+            "summary.quickStats.overallCpuUsage",
+            "summary.quickStats.guestMemoryUsage",
+            "storage",
+        ])
 
-        # Filter VMs with valid config, then fetch all perf data in one batch call
-        valid_vms = [vm for vm in raw_vms if vm.config is not None]
-        avg_cpu_map = _batch_cpu_avg(perf_mgr, valid_vms)
+        # ── 2. Bulk-fetch all host properties (1 RPC) ────────────────────
+        host_props = _collect_properties(content, vim.HostSystem, [
+            "name", "parent",
+            "summary.hardware.cpuMhz", "summary.hardware.numCpuCores",
+            "summary.hardware.memorySize",
+            "summary.quickStats.overallCpuUsage",
+            "summary.quickStats.overallMemoryUsage",
+        ])
 
+        # ── 3. Bulk-fetch cluster names (1 RPC) ───────────────────────────
+        cluster_props = _collect_properties(content, vim.ClusterComputeResource, ["name"])
+        cluster_name_map = {ref._moId: p.get("name", "unknown") for ref, p in cluster_props.items()}
+
+        # Build host_moId -> (host_name, cluster_name)
+        host_info: dict[str, tuple[str, str]] = {}
+        for ref, p in host_props.items():
+            parent = p.get("parent")
+            if isinstance(parent, vim.ClusterComputeResource):
+                cname = cluster_name_map.get(parent._moId, "unknown")
+            else:
+                cname = "standalone"
+            host_info[ref._moId] = (p.get("name", "unknown"), cname)
+
+        # ── 4. Batch QueryPerf for CPU history (ceil(N/64) RPCs) ─────────
+        valid_refs = [r for r, p in vm_props.items() if p.get("config.uuid")]
+        avg_cpu_map = _batch_cpu_avg(perf_mgr, valid_refs)
+
+        # ── 5. Build VMSummary list ───────────────────────────────────────
         vms: list[VMSummary] = []
-        for vm in valid_vms:
-            summary = vm.summary
-            config = summary.config
-            runtime = summary.runtime
-            quick = summary.quickStats
+        for vm_ref, p in vm_props.items():
+            if not p.get("config.uuid"):
+                continue
 
-            cpu_alloc_mhz = config.numCpu * (
-                vm.config.cpuAllocation.reservation or 1000
-            )
-            ram_alloc_mb = config.memorySizeMB
-            cpu_used_mhz = float(quick.overallCpuUsage or 0)
-            ram_used_mb = float(quick.guestMemoryUsage or 0)
+            num_cpu       = p.get("config.numCpu", 1) or 1
+            cpu_alloc_obj = p.get("config.cpuAllocation")
+            reservation   = (getattr(cpu_alloc_obj, "reservation", None) or 1000)
+            cpu_alloc_mhz = num_cpu * reservation
+            ram_alloc_mb  = p.get("config.memorySizeMB") or 0
+            power_state   = str(p.get("summary.runtime.powerState", "unknown"))
+            host_ref      = p.get("summary.runtime.host")
+            cpu_used_mhz  = float(p.get("summary.quickStats.overallCpuUsage") or 0)
+            ram_used_mb   = float(p.get("summary.quickStats.guestMemoryUsage") or 0)
 
             cpu_util = (cpu_used_mhz / cpu_alloc_mhz * 100) if cpu_alloc_mhz else 0
-            ram_util = (ram_used_mb / ram_alloc_mb * 100) if ram_alloc_mb else 0
+            ram_util = (ram_used_mb  / ram_alloc_mb  * 100) if ram_alloc_mb  else 0
 
-            avg_cpu = avg_cpu_map.get(vm)
-            is_idle = (avg_cpu is not None and avg_cpu < IDLE_CPU_THRESHOLD_PCT) \
-                      or (cpu_util < IDLE_CPU_THRESHOLD_PCT)
-            is_oversized = cpu_util < OVERSIZED_CPU_THRESHOLD_PCT \
-                           and ram_util < OVERSIZED_RAM_THRESHOLD_PCT
+            avg_cpu      = avg_cpu_map.get(vm_ref)
+            is_idle      = (avg_cpu is not None and avg_cpu < IDLE_CPU_THRESHOLD_PCT) \
+                           or (cpu_util < IDLE_CPU_THRESHOLD_PCT)
+            is_oversized = (cpu_util < OVERSIZED_CPU_THRESHOLD_PCT
+                            and ram_util < OVERSIZED_RAM_THRESHOLD_PCT)
 
-            # Resolve cluster name
-            host_obj = runtime.host
+            host_name    = "unknown"
             cluster_name = "standalone"
-            if host_obj and hasattr(host_obj, "parent"):
-                parent = host_obj.parent
-                if isinstance(parent, vim.ClusterComputeResource):
-                    cluster_name = parent.name
+            if host_ref:
+                host_name, cluster_name = host_info.get(host_ref._moId, ("unknown", "standalone"))
 
+            storage      = p.get("storage")
             datastore_gb = 0.0
-            for ds in vm.storage.perDatastoreUsage if vm.storage else []:
-                datastore_gb += (ds.committed + ds.uncommitted) / (1024 ** 3)
+            if storage:
+                for ds in (storage.perDatastoreUsage or []):
+                    datastore_gb += (ds.committed + ds.uncommitted) / (1024 ** 3)
 
             vms.append(VMSummary(
-                vm_id=vm.config.uuid,
-                name=config.name,
-                power_state=str(runtime.powerState),
+                vm_id=p["config.uuid"],
+                name=p.get("config.name", ""),
+                power_state=power_state,
                 cpu_allocated_mhz=cpu_alloc_mhz,
                 cpu_used_mhz=cpu_used_mhz,
                 cpu_util_pct=round(cpu_util, 1),
@@ -141,49 +210,40 @@ def fetch_vcenter_summary() -> VCenterSummary:
                 ram_used_mb=ram_used_mb,
                 ram_util_pct=round(ram_util, 1),
                 datastore_gb=round(datastore_gb, 2),
-                host=host_obj.name if host_obj else "unknown",
+                host=host_name,
                 cluster=cluster_name,
                 is_idle=is_idle,
-                is_oversized=is_oversized
+                is_oversized=is_oversized,
             ))
 
-        # Build cluster-level rollups
-        clusters_raw = content.viewManager.CreateContainerView(
-            content.rootFolder,
-            [vim.ClusterComputeResource],
-            True
-        )
+        # ── 6. Cluster rollups (per-cluster resource usage) ──────────────
         clusters: list[ClusterSummary] = []
-        for cl in clusters_raw.view:
-            usage = cl.GetResourceUsage()
-            cluster_vms = [v for v in vms if v.cluster == cl.name]
-            clusters.append(ClusterSummary(
-                name=cl.name,
-                host_count=len(cl.host),
-                total_cpu_ghz=round(usage.cpuCapacityMHz / 1000, 2),
-                used_cpu_ghz=round(usage.cpuUsedMHz / 1000, 2),
-                cpu_util_pct=round(usage.cpuUsedMHz / usage.cpuCapacityMHz * 100, 1) if usage.cpuCapacityMHz else 0,
-                total_ram_gb=round(usage.memCapacityMB / 1024, 1),
-                used_ram_gb=round(usage.memUsedMB / 1024, 1),
-                ram_util_pct=round(usage.memUsedMB / usage.memCapacityMB * 100, 1) if usage.memCapacityMB else 0,
-                vm_count=len(cluster_vms),
-                idle_vm_count=sum(1 for v in cluster_vms if v.is_idle),
-                oversized_vm_count=sum(1 for v in cluster_vms if v.is_oversized),
-                status=HealthStatus.OK
-            ))
-        clusters_raw.Destroy()
+        for cl_ref, cp in cluster_props.items():
+            cl_name = cp.get("name", "unknown")
+            try:
+                usage = cl_ref.GetResourceUsage()
+                cluster_vms = [v for v in vms if v.cluster == cl_name]
+                clusters.append(ClusterSummary(
+                    name=cl_name,
+                    host_count=len([h for h, (_, cn) in host_info.items() if cn == cl_name]),
+                    total_cpu_ghz=round(usage.cpuCapacityMHz / 1000, 2),
+                    used_cpu_ghz=round(usage.cpuUsedMHz / 1000, 2),
+                    cpu_util_pct=round(usage.cpuUsedMHz / usage.cpuCapacityMHz * 100, 1) if usage.cpuCapacityMHz else 0,
+                    total_ram_gb=round(usage.memCapacityMB / 1024, 1),
+                    used_ram_gb=round(usage.memUsedMB / 1024, 1),
+                    ram_util_pct=round(usage.memUsedMB / usage.memCapacityMB * 100, 1) if usage.memCapacityMB else 0,
+                    vm_count=len(cluster_vms),
+                    idle_vm_count=sum(1 for v in cluster_vms if v.is_idle),
+                    oversized_vm_count=sum(1 for v in cluster_vms if v.is_oversized),
+                    status=HealthStatus.OK,
+                ))
+            except Exception as e:
+                logger.warning(f"Cluster {cl_name} resource usage failed: {e}")
 
-        idle_vms = [v for v in vms if v.is_idle]
+        idle_vms      = [v for v in vms if v.is_idle]
         oversized_vms = [v for v in vms if v.is_oversized]
-
-        wasted_cpu = sum(
-            (v.cpu_allocated_mhz - v.cpu_used_mhz) / 1000
-            for v in oversized_vms
-        )
-        wasted_ram = sum(
-            (v.ram_allocated_mb - v.ram_used_mb) / 1024
-            for v in oversized_vms
-        )
+        wasted_cpu    = sum((v.cpu_allocated_mhz - v.cpu_used_mhz) / 1000 for v in oversized_vms)
+        wasted_ram    = sum((v.ram_allocated_mb  - v.ram_used_mb)  / 1024 for v in oversized_vms)
 
         return VCenterSummary(
             clusters=clusters,
@@ -193,11 +253,13 @@ def fetch_vcenter_summary() -> VCenterSummary:
             idle_vms=len(idle_vms),
             oversized_vms=len(oversized_vms),
             wasted_cpu_ghz=round(wasted_cpu, 2),
-            wasted_ram_gb=round(wasted_ram, 1)
+            wasted_ram_gb=round(wasted_ram, 1),
         )
     finally:
         Disconnect(si)
 
+
+# ── Snapshots ─────────────────────────────────────────────────────────────────
 
 def _age_days(dt: datetime) -> float:
     if dt.tzinfo is None:
@@ -205,17 +267,15 @@ def _age_days(dt: datetime) -> float:
     return (datetime.now(timezone.utc) - dt).total_seconds() / 86400.0
 
 
-def _snapshot_size_map(vm) -> dict[str, int]:
-    """Return {snapshot_moref_id: size_bytes} using layoutEx delta-file data."""
+def _snapshot_size_map(layout_ex) -> dict[str, int]:
     try:
-        lex = vm.layoutEx
-        if not lex or not lex.snapshot:
+        if not layout_ex or not layout_ex.snapshot:
             return {}
-        files = lex.file or []
+        files = layout_ex.file or []
         result = {}
-        for sl in lex.snapshot:
-            mo_id = sl.key._moId
-            size  = sum(files[k].size for k in (sl.dataKey or []) if k < len(files))
+        for sl in layout_ex.snapshot:
+            mo_id     = sl.key._moId
+            size      = sum(files[k].size for k in (sl.dataKey or []) if k < len(files))
             result[mo_id] = size
         return result
     except Exception:
@@ -225,7 +285,7 @@ def _snapshot_size_map(vm) -> dict[str, int]:
 def _collect_snapshot_tree(snap_list, size_map: dict, depth: int = 0) -> list[SnapshotDetail]:
     details: list[SnapshotDetail] = []
     for snap in snap_list:
-        age  = _age_days(snap.createTime)
+        age   = _age_days(snap.createTime)
         mo_id = snap.snapshot._moId
         size_bytes = size_map.get(mo_id)
         details.append(SnapshotDetail(
@@ -241,102 +301,112 @@ def _collect_snapshot_tree(snap_list, size_map: dict, depth: int = 0) -> list[Sn
 
 
 def fetch_vm_snapshots() -> list[VMSnapshotSummary]:
-    """Return all VMs that have at least one snapshot, with per-snapshot detail."""
-    settings = get_settings()
+    s   = get_settings()
     ctx = _build_ssl_context()
-    si = SmartConnect(
-        host=settings.vcenter_host, user=settings.vcenter_user,
-        pwd=settings.vcenter_password, port=settings.vcenter_port, sslContext=ctx,
+    si  = SmartConnect(
+        host=s.vcenter_host, user=s.vcenter_user,
+        pwd=s.vcenter_password, port=s.vcenter_port, sslContext=ctx,
     )
     try:
         content = si.content
-        vm_view = content.viewManager.CreateContainerView(
-            content.rootFolder, [vim.VirtualMachine], True
-        )
-        results: list[VMSnapshotSummary] = []
-        for vm in vm_view.view:
-            if vm.config is None or vm.snapshot is None:
-                continue
 
-            size_map = _snapshot_size_map(vm)
-            snaps    = _collect_snapshot_tree(vm.snapshot.rootSnapshotList, size_map)
+        # Bulk-fetch snapshot-relevant properties
+        vm_props = _collect_properties(content, vim.VirtualMachine, [
+            "config.uuid", "config.name",
+            "snapshot", "layoutEx",
+            "summary.runtime.host",
+        ])
+
+        host_props = _collect_properties(content, vim.HostSystem, ["name", "parent"])
+        cluster_props = _collect_properties(content, vim.ClusterComputeResource, ["name"])
+        cluster_name_map = {ref._moId: p.get("name", "unknown") for ref, p in cluster_props.items()}
+        host_info: dict[str, tuple[str, str]] = {}
+        for ref, p in host_props.items():
+            parent = p.get("parent")
+            cname  = cluster_name_map.get(parent._moId, "unknown") if isinstance(parent, vim.ClusterComputeResource) else "standalone"
+            host_info[ref._moId] = (p.get("name", "unknown"), cname)
+
+        results: list[VMSnapshotSummary] = []
+        for vm_ref, p in vm_props.items():
+            if not p.get("config.uuid") or not p.get("snapshot"):
+                continue
+            size_map = _snapshot_size_map(p.get("layoutEx"))
+            snaps    = _collect_snapshot_tree(p["snapshot"].rootSnapshotList, size_map)
             if not snaps:
                 continue
 
             ages      = [s.age_days for s in snaps]
-            sizes     = [s.size_gb for s in snaps if s.size_gb is not None]
-            total_gb  = round(sum(sizes), 2) if sizes else None
-
-            host_obj     = vm.summary.runtime.host
-            cluster_name = "standalone"
-            if host_obj and isinstance(host_obj.parent, vim.ClusterComputeResource):
-                cluster_name = host_obj.parent.name
+            sizes     = [s.size_gb  for s in snaps if s.size_gb is not None]
+            host_ref  = p.get("summary.runtime.host")
+            host_name, cluster_name = host_info.get(host_ref._moId, ("unknown", "standalone")) if host_ref else ("unknown", "standalone")
 
             results.append(VMSnapshotSummary(
-                vm_id=vm.config.uuid,
-                vm_name=vm.config.name,
-                host=host_obj.name if host_obj else "unknown",
+                vm_id=p["config.uuid"],
+                vm_name=p.get("config.name", ""),
+                host=host_name,
                 cluster=cluster_name,
                 snapshot_count=len(snaps),
                 oldest_days=round(max(ages), 1),
                 newest_days=round(min(ages), 1),
-                total_size_gb=total_gb,
+                total_size_gb=round(sum(sizes), 2) if sizes else None,
                 snapshots=snaps,
             ))
-        vm_view.Destroy()
+
         results.sort(key=lambda r: r.oldest_days, reverse=True)
         return results
     finally:
         Disconnect(si)
 
 
-def fetch_vcenter_hosts() -> list[ESXiHostDetail]:
-    """Return per-ESXi-host hardware and utilisation metrics."""
-    settings = get_settings()
-    ctx = _build_ssl_context()
+# ── ESXi hosts ────────────────────────────────────────────────────────────────
 
-    si = SmartConnect(
-        host=settings.vcenter_host,
-        user=settings.vcenter_user,
-        pwd=settings.vcenter_password,
-        port=settings.vcenter_port,
-        sslContext=ctx
+def fetch_vcenter_hosts() -> list[ESXiHostDetail]:
+    s   = get_settings()
+    ctx = _build_ssl_context()
+    si  = SmartConnect(
+        host=s.vcenter_host, user=s.vcenter_user,
+        pwd=s.vcenter_password, port=s.vcenter_port, sslContext=ctx,
     )
     try:
         content = si.content
 
-        # Count powered-on VMs per ESXi host
-        vm_view = content.viewManager.CreateContainerView(
-            content.rootFolder, [vim.VirtualMachine], True
-        )
+        # Bulk-fetch host properties
+        host_props = _collect_properties(content, vim.HostSystem, [
+            "name", "parent",
+            "summary.hardware.cpuMhz", "summary.hardware.numCpuCores",
+            "summary.hardware.memorySize",
+            "summary.quickStats.overallCpuUsage",
+            "summary.quickStats.overallMemoryUsage",
+        ])
+        cluster_props    = _collect_properties(content, vim.ClusterComputeResource, ["name"])
+        cluster_name_map = {ref._moId: p.get("name", "unknown") for ref, p in cluster_props.items()}
+
+        # Count powered-on VMs per host
+        vm_props = _collect_properties(content, vim.VirtualMachine, [
+            "config.uuid", "summary.runtime.host", "summary.runtime.powerState",
+        ])
         host_vm_count: dict[str, int] = {}
-        for vm in vm_view.view:
-            if vm.config and vm.summary.runtime.host:
-                hn = vm.summary.runtime.host.name
-                host_vm_count[hn] = host_vm_count.get(hn, 0) + 1
-        vm_view.Destroy()
+        for _, p in vm_props.items():
+            if p.get("config.uuid") and str(p.get("summary.runtime.powerState")) == "poweredOn":
+                h = p.get("summary.runtime.host")
+                if h:
+                    host_vm_count[h._moId] = host_vm_count.get(h._moId, 0) + 1
 
-        host_view = content.viewManager.CreateContainerView(
-            content.rootFolder, [vim.HostSystem], True
-        )
         results: list[ESXiHostDetail] = []
-        for host in host_view.view:
-            hw = host.summary.hardware
-            qs = host.summary.quickStats
-            if hw is None:
-                continue
+        for ref, p in host_props.items():
+            cpu_mhz    = p.get("summary.hardware.cpuMhz", 0) or 0
+            num_cores  = p.get("summary.hardware.numCpuCores", 0) or 0
+            total_mhz  = cpu_mhz * num_cores
+            used_mhz   = int(p.get("summary.quickStats.overallCpuUsage") or 0)
+            mem_bytes  = p.get("summary.hardware.memorySize") or 0
+            total_ram_mb = int(mem_bytes // (1024 * 1024))
+            used_ram_mb  = int(p.get("summary.quickStats.overallMemoryUsage") or 0)
 
-            total_mhz = hw.cpuMhz * hw.numCpuCores
-            used_mhz  = int(qs.overallCpuUsage or 0)
-            total_ram_mb = int(hw.memorySize // (1024 * 1024))
-            used_ram_mb  = int(qs.overallMemoryUsage or 0)
-
-            cluster_name = "standalone"
-            if isinstance(host.parent, vim.ClusterComputeResource):
-                cluster_name = host.parent.name
+            parent = p.get("parent")
+            cluster_name = cluster_name_map.get(parent._moId, "unknown") if isinstance(parent, vim.ClusterComputeResource) else "standalone"
 
             results.append(ESXiHostDetail(
-                name=host.name,
+                name=p.get("name", "unknown"),
                 cluster=cluster_name,
                 cpu_total_mhz=total_mhz,
                 cpu_used_mhz=used_mhz,
@@ -344,9 +414,9 @@ def fetch_vcenter_hosts() -> list[ESXiHostDetail]:
                 ram_total_mb=total_ram_mb,
                 ram_used_mb=used_ram_mb,
                 ram_util_pct=round(used_ram_mb / total_ram_mb * 100, 1) if total_ram_mb else 0.0,
-                vm_count=host_vm_count.get(host.name, 0),
+                vm_count=host_vm_count.get(ref._moId, 0),
             ))
-        host_view.Destroy()
+
         return results
     finally:
         Disconnect(si)

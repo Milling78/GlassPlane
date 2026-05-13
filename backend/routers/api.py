@@ -318,12 +318,18 @@ async def get_summary():
             logger.warning(f"{name} unavailable: {e}")
             return None
 
+    now = time()
     vcenter, aruba, alletra, veeam = await asyncio.gather(
         safe("vcenter", fetch_vcenter_summary),
         safe("aruba",   fetch_aruba_summary),
         safe("alletra", fetch_alletra_summary),
         safe("veeam",   fetch_veeam_summary),
     )
+    # Populate per-subsystem caches so subsequent views don't re-fetch
+    if vcenter  is not None: _cache["vcenter"]  = (now, vcenter)
+    if aruba    is not None: _cache["aruba"]    = (now, aruba)
+    if alletra  is not None: _cache["alletra"]  = (now, alletra)
+    if veeam    is not None: _cache["veeam"]    = (now, veeam)
 
     statuses = []
 
