@@ -53,7 +53,16 @@ function HostCard({ host, history }) {
       {/* Card header */}
       <div className="card-header">
         <div className="card-title" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
-          <span style={{ fontFamily: 'var(--mono)', fontSize: 13 }}>{host.hostname}</span>
+          {host.server_name
+            ? <>
+                <span style={{ fontFamily: 'var(--mono)', fontSize: 13 }}>{host.server_name}</span>
+                <span style={{ fontSize: 10, color: 'var(--muted)', fontWeight: 400 }}>
+                  <i className="ti ti-cpu" style={{ marginRight: 3, fontSize: 9 }} aria-hidden="true" />
+                  {host.hostname}
+                </span>
+              </>
+            : <span style={{ fontFamily: 'var(--mono)', fontSize: 13 }}>{host.hostname}</span>
+          }
           {host.model && (
             <span style={{ fontSize: 10, color: 'var(--muted)', fontWeight: 400 }}>{host.model}{host.serial ? ` · ${host.serial}` : ''}</span>
           )}

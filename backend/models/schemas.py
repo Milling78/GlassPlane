@@ -188,6 +188,7 @@ class AlletraSummary(BaseModel):
 
 class ILOHostSummary(BaseModel):
     hostname: str
+    server_name: Optional[str] = None   # manually mapped server / ESXi hostname
     model: str = ""
     serial: str = ""
     health: str = "OK"           # OK | Warning | Critical

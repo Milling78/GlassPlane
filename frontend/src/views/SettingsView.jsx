@@ -538,6 +538,12 @@ export default function SettingsView() {
         </Row>
         <Field label="PASSWORD" value={cfg.ilo?.password ?? ''} onChange={v => u('ilo', 'password', v)} type="password" />
         <Toggle label="Verify SSL certificate" checked={cfg.ilo?.sslVerify ?? false} onChange={v => u('ilo', 'sslVerify', v)} />
+        <Field
+          label="HOST MAP — iLO → server name (comma-separated ilo_ip=server_name pairs)"
+          value={cfg.ilo?.hostMap ?? ''}
+          onChange={v => u('ilo', 'hostMap', v)}
+          placeholder="192.168.1.10=esxi01.lab.local, 192.168.1.11=esxi02.lab.local"
+        />
       </Section>
 
       {/* DNS */}

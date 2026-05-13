@@ -124,9 +124,24 @@ def _fetch_host(host: str, user: str, password: str, port: int, ssl_verify: bool
     )
 
 
+def _parse_host_map(raw: str) -> dict[str, str]:
+    """Parse 'ilo1=esxi1, ilo2=esxi2' into {ilo_host: server_name}."""
+    result: dict[str, str] = {}
+    for pair in raw.split(","):
+        pair = pair.strip()
+        if "=" in pair:
+            ilo, _, name = pair.partition("=")
+            ilo  = ilo.strip()
+            name = name.strip()
+            if ilo and name:
+                result[ilo] = name
+    return result
+
+
 def fetch_ilo_summary() -> ILOSummary:
-    s     = get_settings()
-    hosts = [h.strip() for h in s.ilo_hosts.split(",") if h.strip()]
+    s        = get_settings()
+    hosts    = [h.strip() for h in s.ilo_hosts.split(",") if h.strip()]
+    host_map = _parse_host_map(s.ilo_host_map)
 
     results: list[ILOHostSummary] = []
     with ThreadPoolExecutor(max_workers=min(len(hosts), 8)) as ex:
@@ -137,11 +152,14 @@ def fetch_ilo_summary() -> ILOSummary:
         for fut in as_completed(futures):
             host = futures[fut]
             try:
-                results.append(fut.result())
+                summary = fut.result()
+                summary.server_name = host_map.get(host)
+                results.append(summary)
             except Exception as e:
                 logger.warning(f"iLO {host}: {e}")
                 results.append(ILOHostSummary(
                     hostname=host,
+                    server_name=host_map.get(host),
                     health="Unknown",
                     status=HealthStatus.WARNING,
                     recent_errors=[f"Connection failed: {e}"],

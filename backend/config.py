@@ -79,6 +79,7 @@ class Settings(BaseSettings):
     ilo_password: str = ""
     ilo_port: int = 443
     ilo_ssl_verify: bool = False
+    ilo_host_map: str = ""       # ilo_ip=esxi_name,... manual iLO→server mapping
 
     # iLO alert thresholds
     alert_ilo_power_cap_pct: float = 90.0   # alert when power > X% of cap

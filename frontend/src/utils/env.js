@@ -34,6 +34,7 @@ export function buildEnvContent(cfg) {
     `ILO_PASSWORD=${cfg.ilo?.password ?? ''}`,
     `ILO_PORT=${cfg.ilo?.port ?? 443}`,
     `ILO_SSL_VERIFY=${cfg.ilo?.sslVerify ?? false}`,
+    `ILO_HOST_MAP=${cfg.ilo?.hostMap ?? ''}`,
     '',
     '# ── Veeam Backup & Replication ────────────────────────────',
     `VEEAM_HOST=${cfg.veeam.host}`,

@@ -60,6 +60,7 @@ async def get_config():
             "password":  s.ilo_password,
             "port":      s.ilo_port,
             "sslVerify": s.ilo_ssl_verify,
+            "hostMap":   s.ilo_host_map,
         },
         "cacheTtl":  s.cache_ttl_seconds,
         "logLevel":  s.log_level,
