@@ -33,6 +33,10 @@ logger = logging.getLogger(__name__)
 _cache: dict[str, tuple[float, Any]] = {}
 
 
+def clear_all_caches() -> None:
+    _cache.clear()
+
+
 def cached(key: str):
     def decorator(fn: Callable):
         @wraps(fn)

@@ -5,6 +5,7 @@ in parallel. One shared username/password across all hosts.
 """
 
 import logging
+import ssl
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import httpx
@@ -15,6 +16,26 @@ from models.schemas import ILOHostSummary, ILOSummary, HealthStatus
 logger = logging.getLogger(__name__)
 
 _BASE = "/redfish/v1"
+
+
+def _make_ssl_ctx(ssl_verify: bool) -> ssl.SSLContext:
+    """
+    Permissive SSL context for iLO.  Gen9 / iLO 4 firmware only supports
+    TLS 1.0/1.1 and a restricted cipher set; the Python default of TLS 1.2+
+    causes 'server disconnected without sending a response'.
+    """
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_REQUIRED if ssl_verify else ssl.CERT_NONE
+    try:
+        ctx.minimum_version = ssl.TLSVersion.TLSv1
+    except (AttributeError, ssl.SSLError):
+        pass
+    try:
+        ctx.set_ciphers("DEFAULT:@SECLEVEL=1")
+    except ssl.SSLError:
+        pass
+    return ctx
 
 
 def _get(client: httpx.Client, host: str, port: int, path: str) -> dict:
@@ -32,7 +53,8 @@ def _worst_health(*statuses: str) -> HealthStatus:
 
 
 def _fetch_host(host: str, user: str, password: str, port: int, ssl_verify: bool) -> ILOHostSummary:
-    with httpx.Client(auth=(user, password), verify=ssl_verify, timeout=15) as client:
+    ssl_ctx = _make_ssl_ctx(ssl_verify)
+    with httpx.Client(auth=(user, password), verify=ssl_ctx, timeout=15) as client:
         # ── System: model, serial, power state, overall health ──────────────
         sys  = _get(client, host, port, "/Systems/1/")
         model       = sys.get("Model", "")

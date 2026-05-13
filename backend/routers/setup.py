@@ -91,6 +91,8 @@ async def get_config():
 @setup_router.post("/reload", dependencies=[Depends(verify_api_key)])
 async def reload_config():
     get_settings.cache_clear()
+    from routers.api import clear_all_caches
+    clear_all_caches()
     return {"ok": True, "message": "Configuration reloaded — new settings are active"}
 
 
