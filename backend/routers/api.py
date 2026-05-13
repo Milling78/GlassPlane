@@ -3,6 +3,7 @@ API routers — one per subsystem plus a unified /summary endpoint.
 All responses are cached for CACHE_TTL_SECONDS to avoid hammering APIs.
 """
 
+import asyncio
 import logging
 from functools import wraps
 from time import time
@@ -42,7 +43,8 @@ def cached(key: str):
                 ts, val = _cache[key]
                 if now - ts < ttl:
                     return val
-            result = fn(*args, **kwargs)
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(None, lambda: fn(*args, **kwargs))
             _cache[key] = (now, result)
             return result
         return wrapper
@@ -307,26 +309,23 @@ def _optimization_score(
 
 @glassplane_router.get("/", response_model=GlassplaneSummary)
 async def get_summary():
-    vcenter = aruba = alletra = veeam = None
-    statuses = []
+    loop = asyncio.get_event_loop()
 
-    for name, fetcher, setter in [
-        ("vcenter", fetch_vcenter_summary, lambda v: None),
-        ("aruba", fetch_aruba_summary, lambda v: None),
-        ("alletra", fetch_alletra_summary, lambda v: None),
-        ("veeam", fetch_veeam_summary, lambda v: None),
-    ]:
+    async def safe(name: str, fetcher):
         try:
-            if name == "vcenter":
-                vcenter = fetch_vcenter_summary()
-            elif name == "aruba":
-                aruba = fetch_aruba_summary()
-            elif name == "alletra":
-                alletra = fetch_alletra_summary()
-            elif name == "veeam":
-                veeam = fetch_veeam_summary()
+            return await loop.run_in_executor(None, fetcher)
         except Exception as e:
             logger.warning(f"{name} unavailable: {e}")
+            return None
+
+    vcenter, aruba, alletra, veeam = await asyncio.gather(
+        safe("vcenter", fetch_vcenter_summary),
+        safe("aruba",   fetch_aruba_summary),
+        safe("alletra", fetch_alletra_summary),
+        safe("veeam",   fetch_veeam_summary),
+    )
+
+    statuses = []
 
     # Gather worst status
     for obj in [aruba, alletra, veeam]:
