@@ -128,12 +128,12 @@ def fetch_vcenter_summary() -> VCenterSummary:
 
         # ── 1. Bulk-fetch all VM properties (1 RPC) ───────────────────────
         vm_props = _collect_properties(content, vim.VirtualMachine, [
-            "config.uuid", "config.name", "config.numCpu",
-            "config.cpuAllocation", "config.memorySizeMB",
+            "config.uuid", "config.name", "config.cpuAllocation",
+            "summary.config.numCpu", "summary.config.memorySizeMB",
             "summary.runtime.powerState", "summary.runtime.host",
             "summary.quickStats.overallCpuUsage",
             "summary.quickStats.guestMemoryUsage",
-            "storage",
+            "summary.storage.committed", "summary.storage.uncommitted",
         ])
 
         # ── 2. Bulk-fetch all host properties (1 RPC) ────────────────────
@@ -169,11 +169,14 @@ def fetch_vcenter_summary() -> VCenterSummary:
             if not p.get("config.uuid"):
                 continue
 
-            num_cpu       = p.get("config.numCpu", 1) or 1
+            num_cpu       = p.get("summary.config.numCpu", 1) or 1
             cpu_alloc_obj = p.get("config.cpuAllocation")
             reservation   = (getattr(cpu_alloc_obj, "reservation", None) or 1000)
+            # reservation == -1 means "unlimited" in vSphere — treat as generous 1000 MHz/core
+            if reservation <= 0:
+                reservation = 1000
             cpu_alloc_mhz = num_cpu * reservation
-            ram_alloc_mb  = p.get("config.memorySizeMB") or 0
+            ram_alloc_mb  = p.get("summary.config.memorySizeMB") or 0
             power_state   = str(p.get("summary.runtime.powerState", "unknown"))
             host_ref      = p.get("summary.runtime.host")
             cpu_used_mhz  = float(p.get("summary.quickStats.overallCpuUsage") or 0)
@@ -193,11 +196,9 @@ def fetch_vcenter_summary() -> VCenterSummary:
             if host_ref:
                 host_name, cluster_name = host_info.get(host_ref._moId, ("unknown", "standalone"))
 
-            storage      = p.get("storage")
-            datastore_gb = 0.0
-            if storage:
-                for ds in (storage.perDatastoreUsage or []):
-                    datastore_gb += (ds.committed + ds.uncommitted) / (1024 ** 3)
+            committed    = p.get("summary.storage.committed") or 0
+            uncommitted  = p.get("summary.storage.uncommitted") or 0
+            datastore_gb = (committed + uncommitted) / (1024 ** 3)
 
             vms.append(VMSummary(
                 vm_id=p["config.uuid"],
