@@ -230,6 +230,10 @@ export default function SettingsView() {
     if (window.glassplane?.getAppVersion) {
       window.glassplane.getAppVersion().then(v => setAppVersion(v)).catch(() => {})
     }
+
+    if (window.glassplane?.getUpdateStatus) {
+      window.glassplane.getUpdateStatus().then(s => { if (s) setUpdateStatus(s) }).catch(() => {})
+    }
   }, [])
 
   useEffect(() => {

@@ -8,6 +8,7 @@ const isDev = !app.isPackaged
 let mainWindow = null
 let backendProcess = null
 let backendPort = 8000
+let _lastUpdateStatus = null
 
 // ── Utilities ────────────────────────────────────────────────────────────────
 
@@ -160,6 +161,11 @@ function createWindow(port) {
 
 // ── Auto-updater ──────────────────────────────────────────────────────────────
 
+function _sendUpdateStatus(data) {
+  _lastUpdateStatus = data
+  mainWindow?.webContents.send('update-status', data)
+}
+
 function initAutoUpdater() {
   if (isDev) return
 
@@ -173,31 +179,32 @@ function initAutoUpdater() {
 
   autoUpdater.autoDownload = true
   autoUpdater.autoInstallOnAppQuit = true
+  autoUpdater.logger = { info: m => console.log('[updater]', m), warn: m => console.warn('[updater]', m), error: m => console.error('[updater]', m) }
 
   autoUpdater.on('checking-for-update', () => {
     console.log('[updater] checking for update…')
-    mainWindow?.webContents.send('update-status', { status: 'checking' })
+    _sendUpdateStatus({ status: 'checking' })
   })
 
   autoUpdater.on('update-available', (info) => {
     console.log(`[updater] update available: ${info.version}`)
-    mainWindow?.webContents.send('update-status', { status: 'available', version: info.version })
+    _sendUpdateStatus({ status: 'available', version: info.version })
   })
 
   autoUpdater.on('update-not-available', () => {
     console.log('[updater] up to date')
-    mainWindow?.webContents.send('update-status', { status: 'current' })
+    _sendUpdateStatus({ status: 'current' })
   })
 
   autoUpdater.on('download-progress', (prog) => {
     const pct = Math.round(prog.percent)
     console.log(`[updater] downloading… ${pct}%`)
-    mainWindow?.webContents.send('update-status', { status: 'downloading', percent: pct })
+    _sendUpdateStatus({ status: 'downloading', percent: pct })
   })
 
   autoUpdater.on('update-downloaded', (info) => {
     console.log(`[updater] update downloaded: ${info.version}`)
-    mainWindow?.webContents.send('update-status', { status: 'ready', version: info.version })
+    _sendUpdateStatus({ status: 'ready', version: info.version })
 
     dialog.showMessageBox(mainWindow, {
       type: 'info',
@@ -216,11 +223,11 @@ function initAutoUpdater() {
 
   autoUpdater.on('error', (err) => {
     console.error('[updater] error:', err)
-    mainWindow?.webContents.send('update-status', { status: 'error', message: err.message })
+    _sendUpdateStatus({ status: 'error', message: err.message })
   })
 
-  // Check 10 seconds after launch to let the window load first
-  setTimeout(() => autoUpdater.checkForUpdates(), 10_000)
+  // Check 10 seconds after launch; catch to prevent unhandled rejection
+  setTimeout(() => autoUpdater.checkForUpdates().catch(err => console.error('[updater] checkForUpdates rejected:', err)), 10_000)
 
   ipcMain.handle('check-for-updates', () => autoUpdater.checkForUpdates())
   ipcMain.handle('install-update',    () => autoUpdater.quitAndInstall(false, true))
@@ -228,7 +235,8 @@ function initAutoUpdater() {
 
 // ── IPC handlers ──────────────────────────────────────────────────────────────
 
-ipcMain.handle('get-backend-port', () => backendPort)
+ipcMain.handle('get-backend-port',  () => backendPort)
+ipcMain.handle('get-update-status', () => _lastUpdateStatus)
 
 ipcMain.handle('open-env-file', async () => {
   const envPath = isDev
