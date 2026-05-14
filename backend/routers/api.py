@@ -181,6 +181,17 @@ def get_aruba_direct():
         raise HTTPException(status_code=502, detail=str(e))
 
 
+@aruba_router.get("/wireless/direct", response_model=WirelessSummary)
+@cached("aruba_wireless_direct")
+def get_aruba_wireless_direct():
+    try:
+        from connectors.aruba_wireless_direct import fetch_aruba_wireless_controller
+        return fetch_aruba_wireless_controller()
+    except Exception as e:
+        logger.error(f"Aruba wireless direct error: {e}", exc_info=True)
+        raise HTTPException(status_code=502, detail=str(e))
+
+
 # ── Alletra router ────────────────────────────────────────────────────────────
 
 alletra_router = APIRouter(prefix="/alletra", tags=["Alletra 6000"], dependencies=[Depends(verify_api_key)])

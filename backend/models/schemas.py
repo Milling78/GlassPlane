@@ -128,8 +128,9 @@ class AccessPoint(BaseModel):
     client_count: int
     uptime_seconds: int
     radio_count: int = 0
-    channel_2g: Optional[int] = None
-    channel_5g: Optional[int] = None
+    channel_2g: Optional[str] = None
+    channel_5g: Optional[str] = None
+    source: str = "central"   # "central" | "direct"
 
 
 class WirelessSummary(BaseModel):

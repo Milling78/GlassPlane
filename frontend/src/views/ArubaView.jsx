@@ -45,19 +45,37 @@ function ApStatusBadge({ status }) {
   )
 }
 
-function WirelessTab({ wirelessData, wirelessLoading }) {
-  if (wirelessLoading) return (
+function SourceBadge({ source }) {
+  if (source === 'direct') return (
+    <span style={{ marginLeft: 6, fontSize: 10, fontFamily: 'var(--mono)', background: 'rgba(59,130,246,0.12)', color: 'var(--c-blue)', borderRadius: 4, padding: '1px 5px' }}>DIRECT</span>
+  )
+  return null
+}
+
+function WirelessTab({ wirelessData, wirelessLoading, wirelessDirectData, wirelessDirectLoading }) {
+  const centralAps = wirelessData?.aps ?? []
+  const directAps  = wirelessDirectData?.aps ?? []
+  const allAps     = [...centralAps, ...directAps].sort((a, b) => b.client_count - a.client_count || a.name.localeCompare(b.name))
+  const showSource = centralAps.length > 0 && directAps.length > 0
+
+  const loading = wirelessLoading || wirelessDirectLoading
+  const hasData = wirelessData || wirelessDirectData
+
+  if (loading && !hasData) return (
     <div style={{ padding: '3rem', textAlign: 'center', fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--muted)' }}>
       fetching access points…
     </div>
   )
-  if (!wirelessData) return (
+  if (!hasData) return (
     <div style={{ padding: '3rem', textAlign: 'center', fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--muted)' }}>
-      Aruba Central wireless not configured
+      no wireless data — configure Aruba Central or a Wireless Controller in Settings
     </div>
   )
 
-  const { ap_count, online_count, offline_count, total_clients, aps } = wirelessData
+  const totalAps     = allAps.length
+  const onlineCount  = allAps.filter(a => a.status === 'ok').length
+  const offlineCount = totalAps - onlineCount
+  const totalClients = allAps.reduce((s, a) => s + a.client_count, 0)
 
   return (
     <div>
@@ -65,22 +83,31 @@ function WirelessTab({ wirelessData, wirelessLoading }) {
       <div className="metrics" style={{ marginBottom: '1rem' }}>
         <div className="metric">
           <div className="metric-label">access points</div>
-          <div className="metric-val">{ap_count}</div>
+          <div className="metric-val">{totalAps}</div>
+          {centralAps.length > 0 && directAps.length > 0 && (
+            <div className="metric-sub">{centralAps.length} Central · {directAps.length} direct</div>
+          )}
         </div>
         <div className="metric">
           <div className="metric-label">online</div>
-          <div className="metric-val" style={{ color: 'var(--c-green)' }}>{online_count}</div>
+          <div className="metric-val" style={{ color: 'var(--c-green)' }}>{onlineCount}</div>
         </div>
-        {offline_count > 0 && (
+        {offlineCount > 0 && (
           <div className="metric">
             <div className="metric-label">offline</div>
-            <div className="metric-val" style={{ color: 'var(--c-crit)' }}>{offline_count}</div>
+            <div className="metric-val" style={{ color: 'var(--c-crit)' }}>{offlineCount}</div>
           </div>
         )}
         <div className="metric">
           <div className="metric-label">total clients</div>
-          <div className="metric-val">{total_clients}</div>
+          <div className="metric-val">{totalClients}</div>
         </div>
+        {wirelessDirectLoading && (
+          <div className="metric">
+            <div className="metric-label" style={{ color: 'var(--muted)' }}>controller…</div>
+            <div className="metric-val" style={{ fontSize: 12, color: 'var(--muted)' }}>loading</div>
+          </div>
+        )}
       </div>
 
       <div className="card">
@@ -96,11 +123,10 @@ function WirelessTab({ wirelessData, wirelessLoading }) {
               <tr>
                 <th>Name</th>
                 <th>Model</th>
-                <th>Site</th>
+                {!showSource && <th>Site</th>}
                 <th>Group</th>
                 <th>IP</th>
                 <th style={{ textAlign: 'right' }}>Clients</th>
-                <th>Radios</th>
                 <th>Ch 2.4G</th>
                 <th>Ch 5G</th>
                 <th>Uptime</th>
@@ -108,15 +134,17 @@ function WirelessTab({ wirelessData, wirelessLoading }) {
               </tr>
             </thead>
             <tbody>
-              {aps.map(ap => (
-                <tr key={ap.ap_id}>
-                  <td style={{ fontWeight: 500 }}>{ap.name}</td>
-                  <td style={{ color: 'var(--muted)', fontFamily: 'var(--mono)', fontSize: 12 }}>{ap.model}</td>
-                  <td style={{ color: 'var(--muted)' }}>{ap.site || '—'}</td>
+              {allAps.map(ap => (
+                <tr key={`${ap.source}-${ap.ap_id}`}>
+                  <td style={{ fontWeight: 500 }}>
+                    {ap.name}
+                    {showSource && <SourceBadge source={ap.source} />}
+                  </td>
+                  <td style={{ color: 'var(--muted)', fontFamily: 'var(--mono)', fontSize: 12 }}>{ap.model || '—'}</td>
+                  {!showSource && <td style={{ color: 'var(--muted)' }}>{ap.site || '—'}</td>}
                   <td style={{ color: 'var(--muted)' }}>{ap.group || '—'}</td>
                   <td style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--muted)' }}>{ap.ip_address || '—'}</td>
                   <td style={{ textAlign: 'right', fontFamily: 'var(--mono)', fontWeight: 600 }}>{ap.client_count}</td>
-                  <td style={{ textAlign: 'center', color: 'var(--muted)', fontFamily: 'var(--mono)', fontSize: 12 }}>{ap.radio_count}</td>
                   <td style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--muted)' }}>{ap.channel_2g ?? '—'}</td>
                   <td style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--muted)' }}>{ap.channel_5g ?? '—'}</td>
                   <td style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--muted)' }}>{fmtUptime(ap.uptime_seconds)}</td>
@@ -236,8 +264,11 @@ export default function ArubaView({ data }) {
   const [selected, setSelected]         = useState(null)
   const [directData, setDirectData]     = useState(null)
   const [directLoading, setDirectLoading] = useState(false)
-  const [wirelessData, setWirelessData]   = useState(null)
-  const [wirelessLoading, setWirelessLoading] = useState(false)
+  const [wirelessData,       setWirelessData]       = useState(null)
+  const [wirelessLoading,    setWirelessLoading]    = useState(false)
+  const [wirelessDirectData, setWirelessDirectData] = useState(null)
+  const [wirelessDirectLoading, setWirelessDirectLoading] = useState(false)
+  const wirelessFetched = useState(false)
 
   useEffect(() => {
     setDirectLoading(true)
@@ -247,12 +278,19 @@ export default function ArubaView({ data }) {
   }, [])
 
   useEffect(() => {
-    if (tab !== 'wireless' || wirelessData !== null) return
+    if (tab !== 'wireless' || wirelessFetched[0]) return
+    wirelessFetched[1](true)
+
     setWirelessLoading(true)
     api.arubaWireless()
       .then(d => { setWirelessData(d); setWirelessLoading(false) })
       .catch(() => setWirelessLoading(false))
-  }, [tab, wirelessData])
+
+    setWirelessDirectLoading(true)
+    api.arubaWirelessDirect()
+      .then(d => { setWirelessDirectData(d); setWirelessDirectLoading(false) })
+      .catch(() => setWirelessDirectLoading(false))
+  }, [tab])
 
   return (
     <div>
@@ -285,7 +323,12 @@ export default function ArubaView({ data }) {
         />
       )}
       {tab === 'wireless' && (
-        <WirelessTab wirelessData={wirelessData} wirelessLoading={wirelessLoading} />
+        <WirelessTab
+          wirelessData={wirelessData}
+          wirelessLoading={wirelessLoading}
+          wirelessDirectData={wirelessDirectData}
+          wirelessDirectLoading={wirelessDirectLoading}
+        />
       )}
 
       <SwitchDetailModal sw={selected} onClose={() => setSelected(null)} />

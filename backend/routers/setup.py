@@ -34,6 +34,12 @@ async def get_config():
             "customerId":   s.aruba_customer_id,
             "accessToken":  s.aruba_access_token,
         },
+        "arubaWireless": {
+            "host":     s.aruba_wireless_host,
+            "user":     s.aruba_wireless_user,
+            "password": s.aruba_wireless_password,
+            "port":     s.aruba_wireless_port,
+        },
         "arubaDirectSwitches": {
             "hosts":      s.aruba_direct_hosts,
             "user":       s.aruba_direct_user,
@@ -142,6 +148,12 @@ class ArubaDirectTestReq(BaseModel):
     port: int = 443
     ssh_port: int = 22
     ssl_verify: bool = False
+
+class ArubaWirelessTestReq(BaseModel):
+    host: str
+    user: str
+    password: str
+    port: int = 4343
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -283,6 +295,37 @@ def test_aruba_direct(req: ArubaDirectTestReq):
         return {"ok": True, "message": f"SSH — {name}", "method": "ssh"}
     except Exception as ssh_err:
         return {"ok": False, "message": f"REST: {_friendly(rest_err)} | SSH: {_friendly(ssh_err)}"}
+
+
+@setup_router.post("/test/aruba-wireless")
+def test_aruba_wireless(req: ArubaWirelessTestReq):
+    try:
+        import ssl, httpx
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        try:
+            ctx.minimum_version = ssl.TLSVersion.TLSv1
+        except (AttributeError, ssl.SSLError):
+            pass
+        base = f"https://{req.host}:{req.port}/api/v1"
+        with httpx.Client(verify=ctx, timeout=10) as client:
+            r = client.post(f"{base}/api/login", json={"uid": req.user, "passwd": req.password})
+            r.raise_for_status()
+            cookies = r.cookies
+            try:
+                ap_r = client.get(f"{base}/monitor/ap_details", cookies=cookies)
+                ap_r.raise_for_status()
+                ap_count = len(ap_r.json().get("AP Details", []))
+            finally:
+                try:
+                    client.get(f"{base}/api/logout", cookies=cookies)
+                except Exception:
+                    pass
+        return {"ok": True, "message": f"Connected — {ap_count} access point(s) found"}
+    except Exception as e:
+        logger.debug(f"Aruba wireless test failed: {e}")
+        return {"ok": False, "message": _friendly(e)}
 
 
 @setup_router.post("/test/veeam")

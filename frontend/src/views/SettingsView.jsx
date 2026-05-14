@@ -444,6 +444,32 @@ export default function SettingsView() {
         />
       </Section>
 
+      {/* Aruba Wireless Controller */}
+      <Section icon="ti-wifi" title="Aruba — Wireless controller (standalone)" iconColor="var(--c-ok)">
+        <div style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--muted)', lineHeight: 1.6 }}>
+          Connect directly to an Aruba Mobility Controller (ArubaOS). Default REST API port is 4343.
+        </div>
+        <Row>
+          <div style={{ flex: 2 }}>
+            <Field label="HOST / IP" value={cfg.arubaWireless?.host ?? ''} onChange={v => u('arubaWireless', 'host', v)} placeholder="aruba-mc.lab.local" />
+          </div>
+          <div style={{ flex: 1 }}>
+            <Field label="PORT" value={String(cfg.arubaWireless?.port ?? 4343)} onChange={v => u('arubaWireless', 'port', parseInt(v) || 4343)} />
+          </div>
+        </Row>
+        <Field label="USERNAME" value={cfg.arubaWireless?.user ?? ''} onChange={v => u('arubaWireless', 'user', v)} placeholder="admin" />
+        <Field label="PASSWORD" value={cfg.arubaWireless?.password ?? ''} onChange={v => u('arubaWireless', 'password', v)} type="password" />
+        <TestRow
+          disabled={!cfg.arubaWireless?.host || !cfg.arubaWireless?.user || !cfg.arubaWireless?.password}
+          onTest={() => testConnector('aruba-wireless', {
+            host: cfg.arubaWireless?.host,
+            user: cfg.arubaWireless?.user,
+            password: cfg.arubaWireless?.password,
+            port: cfg.arubaWireless?.port ?? 4343,
+          })}
+        />
+      </Section>
+
       {/* Aruba Direct */}
       <Section icon="ti-plug-connected" title="Aruba — Direct switches (no Central)" iconColor="var(--c-ok)">
         <div style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--muted)', lineHeight: 1.6 }}>

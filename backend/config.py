@@ -65,6 +65,12 @@ class Settings(BaseSettings):
     alert_veeam_unprotected_vms: int = 1
     alert_veeam_repo_util_pct: float = 80.0
 
+    # Aruba wireless controller (ArubaOS Mobility Controller — standalone)
+    aruba_wireless_host: str = ""
+    aruba_wireless_user: str = ""
+    aruba_wireless_password: str = ""
+    aruba_wireless_port: int = 4343
+
     # Aruba direct (AOS-CX REST / SSH fallback)
     aruba_direct_hosts: str = ""     # comma-separated IPs or hostnames
     aruba_direct_user: str = ""
