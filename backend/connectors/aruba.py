@@ -46,13 +46,22 @@ def _get_access_token(client: httpx.Client, settings) -> str:
 
 
 def _fetch_switches(client: httpx.Client, base_url: str, token: str) -> list[dict]:
-    resp = client.get(
-        f"{base_url}/monitoring/v1/switches",
-        headers=_headers(token),
-        params={"limit": 1000, "offset": 0}
-    )
-    resp.raise_for_status()
-    return resp.json().get("switches", [])
+    items: list[dict] = []
+    offset = 0
+    while True:
+        resp = client.get(
+            f"{base_url}/monitoring/v1/switches",
+            headers=_headers(token),
+            params={"limit": 1000, "offset": offset},
+        )
+        resp.raise_for_status()
+        data  = resp.json()
+        batch = data.get("switches", [])
+        items.extend(batch)
+        if len(items) >= data.get("total", len(items)) or not batch:
+            break
+        offset += len(batch)
+    return items
 
 
 def _fetch_switch_ports(client: httpx.Client, base_url: str, token: str, serial: str) -> list[dict]:
@@ -70,13 +79,22 @@ def _map_status(status: str) -> HealthStatus:
 
 
 def _fetch_aps(client: httpx.Client, base_url: str, token: str) -> list[dict]:
-    resp = client.get(
-        f"{base_url}/monitoring/v1/aps",
-        headers=_headers(token),
-        params={"limit": 1000, "offset": 0},
-    )
-    resp.raise_for_status()
-    return resp.json().get("aps", [])
+    items: list[dict] = []
+    offset = 0
+    while True:
+        resp = client.get(
+            f"{base_url}/monitoring/v1/aps",
+            headers=_headers(token),
+            params={"limit": 1000, "offset": offset},
+        )
+        resp.raise_for_status()
+        data  = resp.json()
+        batch = data.get("aps", [])
+        items.extend(batch)
+        if len(items) >= data.get("total", len(items)) or not batch:
+            break
+        offset += len(batch)
+    return items
 
 
 def fetch_aruba_wireless() -> WirelessSummary:

@@ -48,9 +48,13 @@ export default function AlertsView() {
   const [checking, setChecking] = useState(false)
 
   const load = useCallback(async () => {
-    const [s, h] = await Promise.all([api.alertStatus(), api.alertHistory()])
-    setStatus(s)
-    setHistory(h.history ?? [])
+    try {
+      const [s, h] = await Promise.all([api.alertStatus(), api.alertHistory()])
+      setStatus(s)
+      setHistory(h.history ?? [])
+    } catch {
+      // best-effort — alerts view degrades gracefully on error
+    }
   }, [])
 
   useEffect(() => { load() }, [load])

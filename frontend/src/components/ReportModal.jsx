@@ -82,6 +82,10 @@ export default function ReportModal({ vms, onClose }) {
   const actionCount     = rows.filter(r => r.rec.severity !== 'ok').length
   const reportDate      = new Date().toLocaleString()
 
+  function esc(s) {
+    return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+  }
+
   function handlePrint() {
     const w = window.open('', '_blank')
     w.document.write(`<!DOCTYPE html><html><head>
@@ -121,16 +125,16 @@ export default function ReportModal({ vms, onClose }) {
   </tr></thead>
   <tbody>
     ${rows.map(({ vm, rec }) => `<tr>
-      <td><strong>${vm.name}</strong></td>
-      <td>${vm.cluster}</td>
+      <td><strong>${esc(vm.name)}</strong></td>
+      <td>${esc(vm.cluster)}</td>
       <td><span class="badge ${rec.severity === 'critical' ? 'b-crit' : rec.severity === 'warning' ? 'b-warn' : 'b-ok'}">${vm.is_idle ? 'idle' : vm.is_oversized ? 'oversized' : 'healthy'}</span></td>
-      <td>${rec.action}</td>
-      <td>${fmtCpu(vm.cpu_allocated_mhz)}</td>
-      <td>${fmtRam(vm.ram_allocated_mb)}</td>
-      <td>${fmtCpu(rec.recCpuMhz)}</td>
-      <td>${fmtRam(rec.recRamMb)}</td>
-      <td class="save">${rec.saveCpuMhz > 0 ? fmtCpu(rec.saveCpuMhz) : '—'}</td>
-      <td class="save">${rec.saveRamMb  > 0 ? fmtRam(rec.saveRamMb)  : '—'}</td>
+      <td>${esc(rec.action)}</td>
+      <td>${esc(fmtCpu(vm.cpu_allocated_mhz))}</td>
+      <td>${esc(fmtRam(vm.ram_allocated_mb))}</td>
+      <td>${esc(fmtCpu(rec.recCpuMhz))}</td>
+      <td>${esc(fmtRam(rec.recRamMb))}</td>
+      <td class="save">${rec.saveCpuMhz > 0 ? esc(fmtCpu(rec.saveCpuMhz)) : '—'}</td>
+      <td class="save">${rec.saveRamMb  > 0 ? esc(fmtRam(rec.saveRamMb))  : '—'}</td>
     </tr>`).join('')}
     <tr class="total">
       <td colspan="8">Total potential savings</td>

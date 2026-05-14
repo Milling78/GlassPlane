@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { api } from '../api'
 import SwitchDetailModal from '../components/SwitchDetailModal'
 
@@ -268,7 +268,7 @@ export default function ArubaView({ data }) {
   const [wirelessLoading,    setWirelessLoading]    = useState(false)
   const [wirelessDirectData, setWirelessDirectData] = useState(null)
   const [wirelessDirectLoading, setWirelessDirectLoading] = useState(false)
-  const wirelessFetched = useState(false)
+  const wirelessFetched = useRef(false)
 
   useEffect(() => {
     setDirectLoading(true)
@@ -278,8 +278,8 @@ export default function ArubaView({ data }) {
   }, [])
 
   useEffect(() => {
-    if (tab !== 'wireless' || wirelessFetched[0]) return
-    wirelessFetched[1](true)
+    if (tab !== 'wireless' || wirelessFetched.current) return
+    wirelessFetched.current = true
 
     setWirelessLoading(true)
     api.arubaWireless()

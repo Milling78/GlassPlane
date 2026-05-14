@@ -175,8 +175,8 @@ def fetch_veeam_summary() -> VeeamSummary:
         total_cap = 0.0
         total_used = 0.0
         for r in raw_repos:
-            cap = _gb(r.get("capacityGB", 0) * 1024 ** 3) if r.get("capacityGB") else _gb(r.get("capacity", 0))
-            used = _gb(r.get("usedSpaceGB", 0) * 1024 ** 3) if r.get("usedSpaceGB") else _gb(r.get("usedSpace", 0))
+            cap  = round(float(r.get("capacityGB") or 0), 2)  if r.get("capacityGB")  else _gb(r.get("capacity", 0))
+            used = round(float(r.get("usedSpaceGB") or 0), 2) if r.get("usedSpaceGB") else _gb(r.get("usedSpace", 0))
             free = cap - used
             util = round(used / cap * 100, 1) if cap else 0
             total_cap += cap

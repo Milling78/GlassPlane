@@ -8,6 +8,7 @@ ALERT_INTERVAL_SECONDS. Fires the webhook only on state *transitions*
 
 import asyncio
 import logging
+import threading
 from datetime import datetime, timezone
 
 from config import get_settings
@@ -16,12 +17,14 @@ from alerting.webhook import send_webhook
 logger = logging.getLogger(__name__)
 
 _active: set[str] = set()          # currently-breaching alert keys
+_active_lock = threading.Lock()
 _history: list[dict] = []          # ring buffer of fired events
 _MAX_HISTORY = 200
 
 
 def get_active() -> list[str]:
-    return list(_active)
+    with _active_lock:
+        return list(_active)
 
 
 def get_history() -> list[dict]:
@@ -173,7 +176,8 @@ def run_check() -> None:
             except Exception as e:
                 logger.error(f"Resolved webhook send failed: {e}")
 
-    _active = breach_keys
+    with _active_lock:
+        _active = breach_keys
 
 
 # ── Background loop ───────────────────────────────────────────────────────────
@@ -182,9 +186,9 @@ async def alert_loop() -> None:
     logger.info("Alert loop started")
     while True:
         try:
-            await asyncio.sleep(get_settings().alert_interval_seconds)
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             await loop.run_in_executor(None, run_check)
+            await asyncio.sleep(get_settings().alert_interval_seconds)
         except asyncio.CancelledError:
             logger.info("Alert loop stopped")
             raise

@@ -116,11 +116,16 @@ def _aoscx_fetch(host: str, user: str, password: str, port: int, ssl_verify: boo
 
 def _ssh_run(shell, cmd: str, wait: float = 2.0) -> str:
     shell.send(cmd + "\n")
-    time.sleep(wait)
+    deadline = time.monotonic() + wait + 5.0
     buf = b""
-    while shell.recv_ready():
-        buf += shell.recv(65536)
-        time.sleep(0.05)
+    while time.monotonic() < deadline:
+        if shell.recv_ready():
+            buf += shell.recv(65536)
+            deadline = time.monotonic() + 0.5  # extend on each recv
+        elif shell.exit_status_ready():
+            break
+        else:
+            time.sleep(0.05)
     return buf.decode("utf-8", errors="replace")
 
 

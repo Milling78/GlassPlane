@@ -102,16 +102,17 @@ async function startBackend() {
 
 function stopBackend() {
   if (!backendProcess) return
+  const proc = backendProcess
+  backendProcess = null
   try {
     if (process.platform === 'win32') {
-      spawn('taskkill', ['/pid', String(backendProcess.pid), '/f', '/t'])
+      process.kill(proc.pid)
     } else {
-      backendProcess.kill('SIGTERM')
+      proc.kill('SIGTERM')
     }
   } catch (e) {
     console.error('[main] failed to kill backend:', e)
   }
-  backendProcess = null
 }
 
 // ── Window ────────────────────────────────────────────────────────────────────
@@ -290,7 +291,6 @@ app.whenReady().then(async () => {
 })
 
 app.on('window-all-closed', () => {
-  stopBackend()
   if (process.platform !== 'darwin') app.quit()
 })
 

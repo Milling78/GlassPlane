@@ -186,9 +186,12 @@ def fetch_vcenter_summary() -> VCenterSummary:
             ram_util = (ram_used_mb  / ram_alloc_mb  * 100) if ram_alloc_mb  else 0
 
             avg_cpu      = avg_cpu_map.get(vm_ref)
-            is_idle      = (avg_cpu is not None and avg_cpu < IDLE_CPU_THRESHOLD_PCT) \
-                           or (cpu_util < IDLE_CPU_THRESHOLD_PCT)
-            is_oversized = (cpu_util < OVERSIZED_CPU_THRESHOLD_PCT
+            is_idle      = power_state == "poweredOn" and (
+                               (avg_cpu is not None and avg_cpu < IDLE_CPU_THRESHOLD_PCT)
+                               or cpu_util < IDLE_CPU_THRESHOLD_PCT
+                           )
+            is_oversized = (power_state == "poweredOn"
+                            and cpu_util < OVERSIZED_CPU_THRESHOLD_PCT
                             and ram_util < OVERSIZED_RAM_THRESHOLD_PCT)
 
             host_name    = "unknown"

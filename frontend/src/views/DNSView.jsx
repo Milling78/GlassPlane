@@ -24,6 +24,7 @@ export default function DNSView({ data: propData }) {
 
   useEffect(() => {
     if (propData) { setData(propData); return }
+    setLoading(true)
     api.dns()
       .then(d => { setData(d); setLoading(false) })
       .catch(e => { setError(e.message); setLoading(false) })

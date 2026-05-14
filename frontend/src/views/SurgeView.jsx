@@ -8,13 +8,23 @@ function SurgeSparkline({ series, timestamps, surgeMinutes, threshold }) {
   const chartRef = useRef(null)
 
   useEffect(() => {
-    if (!ref.current || typeof Chart === 'undefined') return
+    if (!ref.current) return
+    if (typeof Chart === 'undefined') {
+      const ctx = ref.current.getContext('2d')
+      if (ctx) {
+        ctx.font = '12px monospace'
+        ctx.fillStyle = '#888'
+        ctx.fillText('Chart.js unavailable', 8, 20)
+      }
+      return
+    }
     if (chartRef.current) chartRef.current.destroy()
 
     const surgeSet = new Set(surgeMinutes)
     const totalMin = series.length
+    const step = Math.max(1, Math.floor(totalMin / 8))
     const labels = timestamps.map((_, i) => {
-      if (i % Math.floor(totalMin / 8) === 0) {
+      if (i % step === 0) {
         const d = new Date(timestamps[i])
         return `${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`
       }

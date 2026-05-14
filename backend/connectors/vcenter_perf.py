@@ -305,7 +305,8 @@ def fetch_vm_surges(
                     is_cyclic=is_cyclic,
                 ))
             except Exception as e:
-                logger.debug(f"Skipping {vm.config.name}: {e}")
+                name = getattr(getattr(vm, 'config', None), 'name', repr(vm))
+                logger.debug(f"Skipping {name}: {e}")
 
         return results
     finally:

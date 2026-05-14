@@ -170,6 +170,11 @@ export default function App() {
     const t = setInterval(refreshDns, 60_000)
     return () => clearInterval(t)
   }, [refreshDns, ready])
+  useEffect(() => {
+    if (!ready) return
+    const t = setInterval(refreshIlo, 120_000)
+    return () => clearInterval(t)
+  }, [refreshIlo, ready])
 
   // ── Gates (all hooks above this line) ─────────────────────────────────────
 

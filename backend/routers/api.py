@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 # ── Simple in-process TTL cache ───────────────────────────────────────────────
 
 _cache: dict[str, tuple[float, Any]] = {}
+_locks: dict[str, asyncio.Lock] = {}
 
 
 def clear_all_caches() -> None:
@@ -41,16 +42,19 @@ def cached(key: str):
     def decorator(fn: Callable):
         @wraps(fn)
         async def wrapper(*args, **kwargs):
-            ttl = get_settings().cache_ttl_seconds
-            now = time()
-            if key in _cache:
-                ts, val = _cache[key]
-                if now - ts < ttl:
-                    return val
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(None, lambda: fn(*args, **kwargs))
-            _cache[key] = (now, result)
-            return result
+            if key not in _locks:
+                _locks[key] = asyncio.Lock()
+            async with _locks[key]:
+                ttl = get_settings().cache_ttl_seconds
+                now = time()
+                if key in _cache:
+                    ts, val = _cache[key]
+                    if now - ts < ttl:
+                        return val
+                loop = asyncio.get_running_loop()
+                result = await loop.run_in_executor(None, lambda: fn(*args, **kwargs))
+                _cache[key] = (now, result)
+                return result
         return wrapper
     return decorator
 
@@ -324,7 +328,7 @@ def _optimization_score(
 
 @glassplane_router.get("/", response_model=GlassplaneSummary)
 async def get_summary():
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
 
     async def safe(name: str, fetcher):
         try:
@@ -349,7 +353,7 @@ async def get_summary():
     statuses = []
 
     # Gather worst status
-    for obj in [aruba, alletra, veeam]:
+    for obj in [vcenter, aruba, alletra, veeam]:
         if obj and hasattr(obj, "status"):
             statuses.append(obj.status)
 

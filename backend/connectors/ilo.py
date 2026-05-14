@@ -143,6 +143,9 @@ def fetch_ilo_summary() -> ILOSummary:
     hosts    = [h.strip() for h in s.ilo_hosts.split(",") if h.strip()]
     host_map = _parse_host_map(s.ilo_host_map)
 
+    if not hosts:
+        return ILOSummary(hosts=[], total_power_watts=0.0, host_count=0, error_count=0, status=HealthStatus.OK)
+
     results: list[ILOHostSummary] = []
     with ThreadPoolExecutor(max_workers=min(len(hosts), 8)) as ex:
         futures = {
