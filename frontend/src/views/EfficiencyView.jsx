@@ -13,7 +13,12 @@ function normalizeHostname(hn) {
 function correlate(esxiHosts, iloHosts) {
   const iloMap = new Map()
   for (const h of (iloHosts ?? [])) {
-    iloMap.set(normalizeHostname(h.hostname), h)
+    // server_name is the manually-mapped ESXi hostname (from ILO_HOST_MAP); prefer it over
+    // the raw iLO address which is often an IP and will never match an ESXi name
+    const key = h.server_name
+      ? normalizeHostname(h.server_name)
+      : normalizeHostname(h.hostname)
+    iloMap.set(key, h)
   }
   return esxiHosts.map(h => {
     const ilo = iloMap.get(normalizeHostname(h.name)) ?? null
