@@ -263,6 +263,7 @@ def test_alletra(req: AlletraTestReq):
 
 @setup_router.post("/test/aruba-direct")
 def test_aruba_direct(req: ArubaDirectTestReq):
+    rest_error = None
     # Try AOS-CX REST first
     try:
         base = f"https://{req.host}:{req.port}/rest/v10.08"
@@ -276,8 +277,8 @@ def test_aruba_direct(req: ArubaDirectTestReq):
             name = d.get("hostname", req.host)
             model = d.get("platform_name", "AOS-CX")
             return {"ok": True, "message": f"AOS-CX REST — {name} ({model})", "method": "aoscx"}
-    except Exception as rest_err:
-        pass
+    except Exception as e:
+        rest_error = e  # save before Python 3 deletes the except-clause variable
 
     # Fall back to SSH
     try:
@@ -294,7 +295,7 @@ def test_aruba_direct(req: ArubaDirectTestReq):
         name = name_m.group(1).strip() if name_m else req.host
         return {"ok": True, "message": f"SSH — {name}", "method": "ssh"}
     except Exception as ssh_err:
-        return {"ok": False, "message": f"REST: {_friendly(rest_err)} | SSH: {_friendly(ssh_err)}"}
+        return {"ok": False, "message": f"REST: {_friendly(rest_error)} | SSH: {_friendly(ssh_err)}"}
 
 
 @setup_router.post("/test/aruba-wireless")

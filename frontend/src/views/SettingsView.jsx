@@ -112,6 +112,7 @@ async function testConnector(endpoint, body) {
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(15000),
   })
+  if (!res.ok) return { ok: false, message: `Server error ${res.status}` }
   return res.json()
 }
 
