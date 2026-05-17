@@ -4,8 +4,18 @@ every logger so the frontend can display a live log tail.
 """
 
 import logging
+import re
 from collections import deque
 from datetime import datetime, timezone
+
+_REDACT_RE = re.compile(
+    r'(?i)(password|passwd|token|api_key|apikey|secret|bearer)(\s*[=:]\s*|\s+)(\S+)',
+    re.IGNORECASE,
+)
+
+
+def _redact(text: str) -> str:
+    return _REDACT_RE.sub(r'\1\2***', text)
 
 MAX_RECORDS = 500
 
@@ -22,9 +32,9 @@ class _MemoryHandler(logging.Handler):
         if record.name in _MUTED and record.levelno < logging.WARNING:
             return
         try:
-            msg = self.format(record)
+            msg = _redact(self.format(record))
         except Exception:
-            msg = record.getMessage()
+            msg = _redact(record.getMessage())
         self._records.append({
             "ts":      datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
             "level":   record.levelname,   # DEBUG INFO WARNING ERROR CRITICAL

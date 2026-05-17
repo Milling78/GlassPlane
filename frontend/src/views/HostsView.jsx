@@ -45,11 +45,37 @@ function PowerBar({ watts, capWatts }) {
   )
 }
 
+function AmberStrip({ conditions }) {
+  if (!conditions?.length) return null
+  return (
+    <div style={{
+      background: 'rgba(245,158,11,0.12)',
+      borderBottom: '0.5px solid var(--c-warn)',
+      padding: '6px 12px',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 3,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+        <span style={{ fontSize: 10, fontFamily: 'var(--mono)', fontWeight: 700, color: 'var(--c-warn)', textTransform: 'uppercase', letterSpacing: '.05em' }}>
+          ⬛ chassis amber
+        </span>
+      </div>
+      {conditions.map((c, i) => (
+        <div key={i} style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--c-warn)', paddingLeft: 4 }}>
+          · {c}
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function HostCard({ host, history }) {
   const powerHistory = history.map(p => p.ilo_total_power_w)
+  const hasAmber = host.amber_conditions?.length > 0
 
   return (
-    <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+    <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 0, border: hasAmber ? '0.5px solid var(--c-warn)' : undefined }}>
       {/* Card header */}
       <div className="card-header">
         <div className="card-title" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
@@ -74,6 +100,8 @@ function HostCard({ host, history }) {
           </span>
         </div>
       </div>
+
+      <AmberStrip conditions={host.amber_conditions} />
 
       <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         {/* Power */}
@@ -137,6 +165,7 @@ export default function HostsView({ data, history = [] }) {
   )
 
   const { hosts, total_power_watts, host_count, error_count } = localData
+  const amberCount = hosts.filter(h => h.amber_conditions?.length > 0).length
   const powerHistory = history.filter(p => p.ilo_total_power_w != null)
 
   return (
@@ -151,6 +180,12 @@ export default function HostsView({ data, history = [] }) {
           <div className="metric-label">total power</div>
           <div className="metric-val">{total_power_watts} W</div>
         </div>
+        {amberCount > 0 && (
+          <div className="metric">
+            <div className="metric-label">amber alerts</div>
+            <div className="metric-val" style={{ color: 'var(--c-warn)' }}>{amberCount}</div>
+          </div>
+        )}
         <div className="metric">
           <div className="metric-label">IML errors</div>
           <div className="metric-val" style={{ color: error_count > 0 ? 'var(--c-crit)' : undefined }}>{error_count}</div>

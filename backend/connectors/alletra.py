@@ -1,12 +1,12 @@
 """
-HPE Alletra 6000 connector.
-Uses the HPE Primera/Alletra WSAPI (port 8080) — the same REST interface
-shared across HPE Primera 600 / Alletra 6000/9000 arrays.
-Reference: HPE Primera / Alletra OS WSAPI Developer's Guide
+HPE Alletra 6000 / Nimble Storage connector.
+Uses the Nimble Storage REST API v1 (default port 5392).
+Entirely different from the Primera/Alletra 9000 WSAPI — do not confuse.
+
+Auth: POST /v1/tokens  →  X-Auth-Token header
 """
 
 import logging
-import base64
 
 import httpx
 
@@ -15,147 +15,139 @@ from models.schemas import Volume, AlletraSummary, HealthStatus
 
 logger = logging.getLogger(__name__)
 
-
-def _base_url(settings) -> str:
-    return f"https://{settings.alletra_host}:{settings.alletra_port}/api/v1"
+_API = "v1"
 
 
-def _get_token(client: httpx.Client, settings) -> str:
-    cred = base64.b64encode(
-        f"{settings.alletra_user}:{settings.alletra_password}".encode()
-    ).decode()
+def _base(settings) -> str:
+    return f"https://{settings.alletra_host}:{settings.alletra_port}/{_API}"
+
+
+def _login(client: httpx.Client, settings) -> str:
     resp = client.post(
-        f"{_base_url(settings)}/credentials",
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Basic {cred}"
-        },
-        json={"user": settings.alletra_user, "password": settings.alletra_password}
+        f"{_base(settings)}/tokens",
+        json={"data": {"username": settings.alletra_user, "password": settings.alletra_password}},
     )
     resp.raise_for_status()
-    return resp.json()["key"]
+    return resp.json()["data"]["session_token"]
 
 
-def _headers(token: str) -> dict:
-    return {
-        "X-HP3PAR-WSAPI-SessionKey": token,
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-    }
+def _logout(client: httpx.Client, settings, token: str) -> None:
+    try:
+        client.delete(f"{_base(settings)}/tokens/{token}", headers={"X-Auth-Token": token})
+    except Exception:
+        pass
 
 
-def _fetch_system(client: httpx.Client, settings, token: str) -> dict:
-    resp = client.get(f"{_base_url(settings)}/system", headers=_headers(token))
+def _auth(token: str) -> dict:
+    return {"X-Auth-Token": token, "Content-Type": "application/json"}
+
+
+def _get(client: httpx.Client, settings, token: str, path: str, **params) -> dict:
+    resp = client.get(f"{_base(settings)}/{path}", headers=_auth(token), params=params or None)
     resp.raise_for_status()
     return resp.json()
 
 
-def _fetch_capacity(client: httpx.Client, settings, token: str) -> dict:
-    resp = client.get(f"{_base_url(settings)}/capacity", headers=_headers(token))
-    resp.raise_for_status()
-    return resp.json()
-
-
-def _fetch_volumes(client: httpx.Client, settings, token: str) -> list[dict]:
-    resp = client.get(
-        f"{_base_url(settings)}/volumes",
-        headers=_headers(token),
-        params={"query": "\"provisioningType EQ 2 OR provisioningType EQ 3\""}  # TPVV + TDVV
-    )
-    resp.raise_for_status()
-    return resp.json().get("members", [])
-
-
-def _fetch_stats(client: httpx.Client, settings, token: str) -> dict:
-    """Fetch array-level I/O stats."""
-    resp = client.get(
-        f"{_base_url(settings)}/systemreporter/attime/volumestatistics/hires",
-        headers=_headers(token),
-        params={"samplefreq": "hires"}
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    members = data.get("members", [{}])
-    latest = members[-1] if members else {}
-    return latest
-
-
-def _mib_to_gb(mib: float) -> float:
-    return round(mib / 1024, 2)
-
-
-def _mib_to_tb(mib: float) -> float:
-    return round(mib / (1024 * 1024), 3)
+def _to_tb(b: float) -> float:
+    return round(b / (1024 ** 4), 3)
 
 
 def fetch_alletra_summary() -> AlletraSummary:
     settings = get_settings()
 
     with httpx.Client(verify=False, timeout=30) as client:
-        token = _get_token(client, settings)
+        token = _login(client, settings)
+        try:
+            arr_resp = _get(client, settings, token, "arrays", detail="true")
+            vol_resp = _get(client, settings, token, "volumes", detail="true")
+        finally:
+            _logout(client, settings, token)
 
-        system = _fetch_system(client, settings, token)
-        capacity = _fetch_capacity(client, settings, token)
-        raw_volumes = _fetch_volumes(client, settings, token)
-        stats = _fetch_stats(client, settings, token)
+    arrays = arr_resp.get("data") or []
+    arr    = arrays[0] if arrays else {}
 
-        # Capacity (values come in MiB)
-        total_raw = _mib_to_tb(capacity.get("totalCapacityMiB", 0))
-        usable = _mib_to_tb(capacity.get("allocatedCapacityMiB", 0))
-        used = _mib_to_tb(capacity.get("usedCapacityMiB", 0))
-        free = _mib_to_tb(capacity.get("freeCapacityMiB", 0))
-        util_pct = round(used / usable * 100, 1) if usable else 0
+    # ── Capacity ──────────────────────────────────────────────────────────────
+    usable_bytes = float(arr.get("usable_capacity_bytes") or 0)
+    free_bytes   = float(arr.get("free_space_bytes")      or 0)
+    used_bytes   = max(0.0, usable_bytes - free_bytes)
 
-        # Efficiency
-        dedup_ratio = float(system.get("dedupRatio", 1.0)) or 1.0
-        compress_ratio = float(system.get("compressionRatio", 1.0)) or 1.0
-        savings_dedup = round(used * (1 - 1 / dedup_ratio), 3)
-        savings_compress = round(used * (1 - 1 / compress_ratio), 3)
-        total_efficiency = round(dedup_ratio * compress_ratio, 2)
+    usable   = _to_tb(usable_bytes)
+    free     = _to_tb(free_bytes)
+    used     = _to_tb(used_bytes)
+    util_pct = round(used / usable * 100, 1) if usable else 0.0
 
-        # Volumes
-        volumes: list[Volume] = []
-        for v in raw_volumes:
-            prov = _mib_to_gb(v.get("sizeMiB", 0))
-            used_v = _mib_to_gb(v.get("usedMiB", prov * 0.5))
-            util_v = round(used_v / prov * 100, 1) if prov else 0
-            volumes.append(Volume(
-                volume_id=str(v.get("id", "")),
-                name=v.get("name", ""),
-                provisioned_gb=prov,
-                used_gb=used_v,
-                util_pct=util_v,
-                dedup_ratio=float(v.get("deduplicationRatio", dedup_ratio)),
-                compress_ratio=float(v.get("compressionRatio", compress_ratio)),
-                total_savings_pct=round((1 - 1 / total_efficiency) * 100, 1),
-                is_thin=v.get("provisioningType", 2) in (2, 3),
-                host_mapped=v.get("hostName")
-            ))
+    # ── Efficiency ────────────────────────────────────────────────────────────
+    # Nimble exposes combined data_reduction_ratio or individual ratios
+    data_red   = float(arr.get("data_reduction_ratio") or arr.get("space_savings_ratio") or 1.0)
+    comp_ratio = float(arr.get("compression_ratio")    or 1.0)
+    dedup_ratio = float(arr.get("dedup_ratio")         or 1.0)
+    if data_red < 1.0:
+        data_red = 1.0
 
-        # I/O stats
-        iops = int(stats.get("IOPSRead", 0)) + int(stats.get("IOPSWrite", 0))
-        latency_ms = float(stats.get("latencyRead", 0))
-        throughput = float(stats.get("throughputRead", 0)) + float(stats.get("throughputWrite", 0))
+    savings_tb = round(used * (1 - 1 / data_red), 3) if data_red > 1 else 0.0
 
-        array_status = HealthStatus.CRITICAL if util_pct > 85 else (
-            HealthStatus.WARNING if util_pct > 70 else HealthStatus.OK
-        )
+    # ── Volumes ───────────────────────────────────────────────────────────────
+    volumes: list[Volume] = []
+    for v in (vol_resp.get("data") or []):
+        # Nimble size field is in MiB
+        size_mib  = float(v.get("size") or 0)
+        prov_gb   = round(size_mib / 1024, 2)
+        used_bytes_v = float(v.get("vol_usage_compressed_bytes") or 0)
+        used_gb   = round(used_bytes_v / (1024 ** 3), 2)
+        util_v    = round(used_gb / prov_gb * 100, 1) if prov_gb else 0.0
 
-        return AlletraSummary(
-            array_name=system.get("name", "Alletra 6000"),
-            model=system.get("model", ""),
-            total_raw_tb=total_raw,
-            usable_tb=usable,
-            used_tb=used,
-            free_tb=free,
-            util_pct=util_pct,
-            dedup_savings_tb=savings_dedup,
-            compression_savings_tb=savings_compress,
-            total_efficiency_ratio=total_efficiency,
-            volume_count=len(volumes),
-            volumes=volumes,
-            iops=iops,
-            latency_ms=latency_ms,
-            throughput_mbps=round(throughput, 1),
-            status=array_status
-        )
+        # Nimble ACRs tell us which host has access
+        acrs = v.get("access_control_records") or []
+        host_mapped = acrs[0].get("initiator_group_name") if acrs else None
+
+        volumes.append(Volume(
+            volume_id=str(v.get("id", "")),
+            name=v.get("name", ""),
+            provisioned_gb=prov_gb,
+            used_gb=used_gb,
+            util_pct=util_v,
+            dedup_ratio=float(v.get("dedup_ratio") or dedup_ratio),
+            compress_ratio=float(v.get("compression_ratio") or comp_ratio),
+            total_savings_pct=round((1 - 1 / data_red) * 100, 1) if data_red > 1 else 0.0,
+            is_thin=True,
+            host_mapped=host_mapped,
+        ))
+
+    # ── I/O stats (live from array object when detail=true) ───────────────────
+    read_iops  = int(arr.get("read_iops")  or 0)
+    write_iops = int(arr.get("write_iops") or 0)
+    iops       = read_iops + write_iops
+
+    # Latency comes back in microseconds — convert to ms
+    read_lat_us  = float(arr.get("read_latency_usec")  or 0)
+    latency_ms   = round(read_lat_us / 1000, 2)
+
+    # Throughput in bytes/sec → MB/s
+    read_tput  = float(arr.get("read_throughput_bytes")  or 0)
+    write_tput = float(arr.get("write_throughput_bytes") or 0)
+    throughput_mbps = round((read_tput + write_tput) / (1024 * 1024), 1)
+
+    array_status = (
+        HealthStatus.CRITICAL if util_pct > 85 else
+        HealthStatus.WARNING  if util_pct > 70 else
+        HealthStatus.OK
+    )
+
+    return AlletraSummary(
+        array_name=arr.get("name", "Alletra 6000"),
+        model=arr.get("model", ""),
+        total_raw_tb=usable,
+        usable_tb=usable,
+        used_tb=used,
+        free_tb=free,
+        util_pct=util_pct,
+        dedup_savings_tb=savings_tb,
+        compression_savings_tb=0.0,
+        total_efficiency_ratio=data_red,
+        volume_count=len(volumes),
+        volumes=volumes,
+        iops=iops,
+        latency_ms=latency_ms,
+        throughput_mbps=throughput_mbps,
+        status=array_status,
+    )

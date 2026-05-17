@@ -11,7 +11,7 @@ Surge detection algorithm:
 
 import logging
 import ssl
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from statistics import mean, stdev
 from typing import Optional
 
@@ -196,41 +196,97 @@ def _query_metric(
     end: datetime,
     interval: int,
 ) -> tuple[list[float], list[datetime]]:
-    metric_id = vim.PerformanceManager.MetricId(counterId=counter_id, instance="")
-    spec = vim.PerformanceManager.QuerySpec(
-        entity=vm,
-        metricId=[metric_id],
-        startTime=start,
-        endTime=end,
-        intervalId=interval,
-    )
-    results = perf_mgr.QueryPerf(querySpec=[spec])
-    if not results or not results[0].value:
-        return [], []
+    def _run(ivl: int, t_start: datetime = start) -> tuple[list[float], list[datetime]]:
+        metric_id = vim.PerformanceManager.MetricId(counterId=counter_id, instance="")
+        spec = vim.PerformanceManager.QuerySpec(
+            entity=vm,
+            metricId=[metric_id],
+            startTime=t_start,
+            endTime=end,
+            intervalId=ivl,
+        )
+        res = perf_mgr.QueryPerf(querySpec=[spec])
+        if not res or not res[0].value:
+            return [], []
+        values = [v / 100.0 for v in res[0].value[0].value]  # vCenter returns hundredths of %
+        stamps = [s.timestamp for s in res[0].sampleInfo]
+        return values, stamps
 
-    values = [v / 100.0 for v in results[0].value[0].value]   # vCenter returns hundredths of %
-    stamps = [datetime.fromisoformat(str(t)) if not isinstance(t, datetime) else t
-              for t in results[0].sampleInfo]
-
-    # For RAM the counter is usageAverage in KB; convert to % of configured memory
+    values, stamps = _run(interval)
+    if not values and interval != 20:
+        # Real-time buffer is only ~1 hour; clamp start so we don't ask for data
+        # that has already been evicted, which causes vCenter to return empty.
+        rt_start = max(start, datetime.utcnow() - timedelta(minutes=55))
+        values, stamps = _run(20, rt_start)
     return values, stamps
+
+
+# ── DB-backed surge calc ──────────────────────────────────────────────────────
+
+def _surges_from_db(
+    db_data: dict,
+    threshold_pct: float,
+    metric: str,
+) -> list[VMSurgeResult]:
+    results: list[VMSurgeResult] = []
+    for vm_id, vm in db_data.items():
+        series = vm["series"]
+        stamps = vm["timestamps"]
+        if len(series) < 2:
+            continue
+        surge_events = detect_surge_events(series, stamps, threshold_pct)
+        periods      = detect_periodicity(surge_events)
+        results.append(VMSurgeResult(
+            vm_id=vm_id,
+            name=vm["name"],
+            cluster=vm["cluster"],
+            host=vm["host"],
+            metric=metric,
+            series=[round(v, 1) for v in series],
+            series_timestamps=[str(t) for t in stamps],
+            threshold_pct=threshold_pct,
+            surge_events=surge_events,
+            periods=periods,
+            max_pct=round(max(series), 1),
+            avg_pct=round(mean(series), 1),
+            is_cyclic=bool(periods),
+        ))
+    return results
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def fetch_vm_surges(
     threshold_pct: float = DEFAULT_THRESHOLD_PCT,
-    metric: str = "cpu",          # "cpu" | "ram"
+    metric: str = "cpu",
     lookback_hours: float = LOOKBACK_HOURS,
     vm_name_filter: Optional[str] = None,
-) -> list[VMSurgeResult]:
+) -> tuple[list[VMSurgeResult], int]:
     """
-    Pull time-series data for all powered-on VMs and return those
-    exhibiting cyclic surge patterns.
+    Return (results, vms_found).  Reads from the local vm_perf DB when data
+    is available; falls back to a live vCenter query on first run.
     """
+    from config import get_settings as _gs
+    from history.store import read_vm_perf
+    s = _gs()
+    db_data = read_vm_perf(s.db_path, lookback_hours, metric, vm_name_filter)
+    if db_data:
+        results = _surges_from_db(db_data, threshold_pct, metric)
+        return results, len(db_data)
+    # No local data yet — fall back to live vCenter query
+    return _fetch_from_vcenter(threshold_pct, metric, lookback_hours, vm_name_filter)
+
+
+def _fetch_from_vcenter(
+    threshold_pct: float = DEFAULT_THRESHOLD_PCT,
+    metric: str = "cpu",
+    lookback_hours: float = LOOKBACK_HOURS,
+    vm_name_filter: Optional[str] = None,
+) -> tuple[list[VMSurgeResult], int]:
+    """Live vCenter fallback — used only when the local DB has no data yet."""
     settings  = get_settings()
     ctx       = _ssl_ctx()
-    end_time  = datetime.now(timezone.utc)
+    end_time   = datetime.utcnow()
     start_time = end_time - timedelta(hours=lookback_hours)
 
     si = SmartConnect(
@@ -244,7 +300,6 @@ def fetch_vm_surges(
         content  = si.content
         perf_mgr = si.content.perfManager
 
-        # Get counter IDs
         if metric == "cpu":
             counter_id = _get_counter_id(perf_mgr, "cpu", "usage", "average")
         else:
@@ -258,12 +313,13 @@ def fetch_vm_surges(
         )
         vms = [
             vm for vm in container.view
-            if vm.runtime.powerState == "poweredOn"
+            if vm.runtime.powerState == vim.VirtualMachinePowerState.poweredOn
             and vm.config is not None
             and (vm_name_filter is None or vm_name_filter.lower() in vm.config.name.lower())
         ]
         container.Destroy()
 
+        vms_found = len(vms)
         results: list[VMSurgeResult] = []
 
         for vm in vms:
@@ -271,7 +327,7 @@ def fetch_vm_surges(
                 raw_values, stamps = _query_metric(
                     perf_mgr, vm, counter_id, start_time, end_time, SAMPLE_INTERVAL_SEC
                 )
-                if len(raw_values) < 10:
+                if len(raw_values) < 2:
                     continue
 
                 surge_events = detect_surge_events(raw_values, stamps, threshold_pct)
@@ -281,7 +337,6 @@ def fetch_vm_surges(
                 max_pct = round(max(raw_values), 1)
                 avg_pct = round(mean(raw_values), 1)
 
-                # Resolve cluster
                 cluster_name = "standalone"
                 host_obj = vm.runtime.host
                 if host_obj and hasattr(host_obj, "parent"):
@@ -308,6 +363,6 @@ def fetch_vm_surges(
                 name = getattr(getattr(vm, 'config', None), 'name', repr(vm))
                 logger.debug(f"Skipping {name}: {e}")
 
-        return results
+        return results, vms_found
     finally:
         Disconnect(si)

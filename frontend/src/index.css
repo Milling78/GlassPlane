@@ -174,3 +174,72 @@ tr:hover td { background: var(--bg); }
 .warn-text { color: var(--c-warn); }
 .crit-text { color: var(--c-crit); }
 .muted-text{ color: var(--muted); }
+
+/* ── Wall TV Mode ─────────────────────────────────────────────────────────── */
+.tv-root {
+  position: fixed; inset: 0; z-index: 9999;
+  background: #0d0d0b; color: #f0efec;
+  font-family: var(--mono);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.tv-header {
+  display: flex; align-items: center; gap: 2.5rem;
+  padding: 1.1rem 2.5rem;
+  border-bottom: 0.5px solid rgba(255,255,255,0.08);
+  flex-shrink: 0;
+}
+.tv-header-brand {
+  display: flex; align-items: center; gap: 0.65rem;
+  font-size: 22px; font-weight: 600; letter-spacing: -0.01em;
+}
+.tv-header-score {
+  display: flex; flex-direction: column; gap: 1px; padding-left: 1.5rem;
+  border-left: 0.5px solid rgba(255,255,255,0.12);
+}
+.tv-score-label { font-size: 10px; color: #888780; text-transform: uppercase; letter-spacing: 0.06em; }
+.tv-score-value { font-size: 52px; font-weight: 700; line-height: 1; letter-spacing: -0.04em; }
+.tv-score-unit  { font-size: 20px; font-weight: 400; color: #888780; margin-left: 3px; }
+.tv-header-clock {
+  margin-left: auto; display: flex; flex-direction: column; align-items: flex-end; gap: 1px;
+}
+.tv-clock-time   { font-size: 44px; font-weight: 600; line-height: 1; letter-spacing: -0.03em; }
+.tv-clock-date   { font-size: 13px; color: #888780; }
+.tv-clock-refresh{ font-size: 11px; color: #555552; }
+.tv-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem;
+  padding: 1.25rem 2.5rem; flex: 1; overflow: hidden;
+}
+.tv-card {
+  background: rgba(255,255,255,0.035);
+  border: 0.5px solid rgba(255,255,255,0.09);
+  border-radius: 10px; display: flex; flex-direction: column; overflow: hidden;
+}
+.tv-card-header {
+  display: flex; align-items: center; gap: 0.55rem;
+  padding: 0.65rem 1.1rem;
+  border-bottom: 0.5px solid rgba(255,255,255,0.07);
+  font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #888780;
+}
+.tv-card-header .ti { font-size: 15px; }
+.tv-card-status { font-size: 10px; font-weight: 700; margin-left: auto; }
+.tv-card-body {
+  display: grid; grid-template-columns: 1fr 1fr; flex: 1;
+}
+.tv-metric {
+  padding: 0.9rem 1.1rem;
+  border-right: 0.5px solid rgba(255,255,255,0.05);
+  border-bottom: 0.5px solid rgba(255,255,255,0.05);
+  display: flex; flex-direction: column; gap: 0.25rem;
+}
+.tv-metric-label { font-size: 10px; color: #888780; text-transform: uppercase; letter-spacing: 0.05em; }
+.tv-metric-value { font-size: 28px; font-weight: 600; line-height: 1.1; letter-spacing: -0.02em; }
+.tv-metric-unit  { font-size: 14px; font-weight: 400; color: #888780; margin-left: 2px; }
+.tv-footer {
+  padding: 0.5rem 2.5rem; font-size: 11px; color: #444441;
+  border-top: 0.5px solid rgba(255,255,255,0.05);
+  display: flex; align-items: center; gap: 0.4rem; flex-shrink: 0;
+}
+.tv-key {
+  background: rgba(255,255,255,0.07); border: 0.5px solid rgba(255,255,255,0.14);
+  border-radius: 4px; padding: 1px 6px; font-size: 11px; font-family: var(--mono);
+}

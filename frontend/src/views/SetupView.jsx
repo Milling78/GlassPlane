@@ -8,7 +8,7 @@ const DEFAULTS = {
   apiKey: '',
   vcenter:  { host: '', user: 'administrator@vsphere.local', password: '', port: 443,  sslVerify: false, skip: false },
   aruba:    { baseUrl: 'https://apigw-prod2.central.arubanetworks.com', clientId: '', clientSecret: '', customerId: '', accessToken: '', skip: false },
-  alletra:  { host: '', user: '3paradm',       password: '', port: 8080, skip: false },
+  alletra:  { host: '', user: 'admin',          password: '', port: 5392, skip: false },
   veeam:    { host: '', user: 'administrator',  password: '', port: 9419, skip: false },
 }
 

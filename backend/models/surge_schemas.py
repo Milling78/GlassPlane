@@ -37,10 +37,11 @@ class VMSurgeResultSchema(BaseModel):
 
 
 class SurgeSummarySchema(BaseModel):
-    vms_scanned:     int
+    vms_found:       int           # powered-on VMs matching filter, before data check
+    vms_scanned:     int           # VMs with sufficient perf data returned
     vms_flagged:     int
     threshold_pct:   float
     metric:          str
     lookback_hours:  float
     cyclic_vms:      list[VMSurgeResultSchema]
-    all_vms:         list[VMSurgeResultSchema]  # includes non-cyclic for client-side filtering
+    all_vms:         list[VMSurgeResultSchema]  # all VMs with data, not just cyclic

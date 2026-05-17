@@ -8,7 +8,11 @@ export default defineConfig({
     outDir:    'dist',
     emptyOutDir: true,
     rollupOptions: {
-      output: { manualChunks: undefined }
+      output: {
+        manualChunks: {
+          vendor: ['react', 'react-dom'],
+        },
+      },
     }
   },
   server: {

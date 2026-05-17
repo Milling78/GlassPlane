@@ -45,9 +45,12 @@ function SubHeading({ children }) {
 
 // ── Shared field components ───────────────────────────────────────────────────
 
-function Field({ label, value, onChange, type = 'text', placeholder = '', mono = true }) {
+function Field({ label, value, onChange, type = 'text', placeholder = '', mono = true, configured = false }) {
   const [show, setShow] = useState(false)
   const isPassword = type === 'password'
+  const effectivePlaceholder = isPassword && !value && configured
+    ? '(saved — leave blank to keep)'
+    : placeholder
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
       {label && (
@@ -58,7 +61,7 @@ function Field({ label, value, onChange, type = 'text', placeholder = '', mono =
           type={isPassword && !show ? 'password' : 'text'}
           value={value}
           onChange={e => onChange(e.target.value)}
-          placeholder={placeholder}
+          placeholder={effectivePlaceholder}
           style={{
             flex: 1,
             background: 'var(--bg)',
@@ -116,7 +119,7 @@ async function testConnector(endpoint, body) {
   return res.json()
 }
 
-function TestRow({ onTest, disabled }) {
+function TestRow({ onTest, disabled, onDiagnose }) {
   const [testing, setTesting] = useState(false)
   const [result,  setResult]  = useState(null)
 
@@ -130,24 +133,36 @@ function TestRow({ onTest, disabled }) {
     finally { setTesting(false) }
   }
 
+  const btnBase = {
+    display: 'flex', alignItems: 'center', gap: 6,
+    background: 'var(--bg)', border: '0.5px solid var(--border)',
+    borderRadius: 6, padding: '0.4rem 0.75rem',
+    fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)',
+    cursor: 'pointer',
+  }
+
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 2 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2, flexWrap: 'wrap' }}>
       <button
         type="button"
         onClick={run}
         disabled={disabled || testing}
-        style={{
-          display: 'flex', alignItems: 'center', gap: 6,
-          background: 'var(--bg)', border: '0.5px solid var(--border)',
-          borderRadius: 6, padding: '0.4rem 0.75rem',
-          fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)',
-          cursor: disabled || testing ? 'not-allowed' : 'pointer',
-          opacity: disabled ? 0.5 : 1,
-        }}
+        style={{ ...btnBase, cursor: disabled || testing ? 'not-allowed' : 'pointer', opacity: disabled ? 0.5 : 1 }}
       >
         <i className={`ti ${testing ? 'ti-loader-2' : 'ti-plug-connected'}`} aria-hidden="true" />
         {testing ? 'Testing…' : 'Test connection'}
       </button>
+      {onDiagnose && (
+        <button
+          type="button"
+          onClick={onDiagnose}
+          disabled={disabled}
+          style={{ ...btnBase, cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.5 : 1 }}
+        >
+          <i className="ti ti-stethoscope" aria-hidden="true" />
+          Diagnose
+        </button>
+      )}
       {result && (
         <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: result.ok ? 'var(--c-ok)' : 'var(--c-crit)', display: 'flex', alignItems: 'center', gap: 5 }}>
           <i className={`ti ${result.ok ? 'ti-circle-check' : 'ti-circle-x'}`} aria-hidden="true" />
@@ -155,6 +170,124 @@ function TestRow({ onTest, disabled }) {
         </span>
       )}
     </div>
+  )
+}
+
+// ── Diagnostic step-list modal ────────────────────────────────────────────────
+
+function DiagnoseModal({ data, onClose }) {
+  useEffect(() => {
+    function onKey(e) { if (e.key === 'Escape') onClose() }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  if (!data) return null
+
+  const icon = (ok) => {
+    if (ok === true)  return { cls: 'ti-circle-check', color: 'var(--c-ok)' }
+    if (ok === false) return { cls: 'ti-circle-x',     color: 'var(--c-crit)' }
+    return { cls: 'ti-minus', color: 'var(--muted)' }
+  }
+
+  return (
+    <>
+      <style>{`@keyframes gp-spin { from { transform:rotate(0deg) } to { transform:rotate(360deg) } }`}</style>
+      <div
+        onClick={onClose}
+        style={{
+          position: 'fixed', inset: 0, zIndex: 1000,
+          background: 'rgba(0,0,0,0.55)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}
+      >
+        <div
+          onClick={e => e.stopPropagation()}
+          style={{
+            background: 'var(--card)', border: '0.5px solid var(--border)',
+            borderRadius: 12, width: 600, maxHeight: '80vh',
+            display: 'flex', flexDirection: 'column',
+            boxShadow: '0 20px 60px rgba(0,0,0,0.45)',
+          }}
+        >
+          {/* Header */}
+          <div style={{
+            padding: '1rem 1.25rem 0.8rem',
+            borderBottom: '0.5px solid var(--border)',
+            display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
+          }}>
+            <div>
+              <div style={{ fontFamily: 'var(--mono)', fontWeight: 600, fontSize: 13, color: 'var(--text)' }}>
+                Connection Diagnostics
+              </div>
+              <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
+                {data.title}
+              </div>
+            </div>
+            <button
+              onClick={onClose}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: 18, lineHeight: 1, padding: 0 }}
+            >
+              <i className="ti ti-x" aria-hidden="true" />
+            </button>
+          </div>
+
+          {/* Steps */}
+          <div style={{ flex: 1, overflowY: 'auto', padding: '0.5rem 1.25rem' }}>
+            {data.running && data.steps.length === 0 && (
+              <div style={{ padding: '1rem 0', fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                <i className="ti ti-loader-2" style={{ animation: 'gp-spin 1s linear infinite' }} />
+                Running diagnostics…
+              </div>
+            )}
+            {data.steps.map((s, i) => {
+              const { cls, color } = icon(s.ok)
+              return (
+                <div
+                  key={i}
+                  style={{
+                    display: 'flex', gap: 10, padding: '0.5rem 0',
+                    borderBottom: i < data.steps.length - 1 ? '0.5px solid var(--border)' : 'none',
+                  }}
+                >
+                  <i className={`ti ${cls}`} style={{ color, fontSize: 14, marginTop: 1, flexShrink: 0 }} aria-hidden="true" />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 500, color: 'var(--text)' }}>
+                      {s.label}
+                    </div>
+                    {s.detail && (
+                      <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)', marginTop: 2, wordBreak: 'break-all' }}>
+                        {s.detail}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+            {data.running && data.steps.length > 0 && (
+              <div style={{ padding: '0.5rem 0', fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <i className="ti ti-loader-2" style={{ animation: 'gp-spin 1s linear infinite' }} />
+                Running…
+              </div>
+            )}
+          </div>
+
+          {/* Summary footer */}
+          {!data.running && data.summary && (
+            <div style={{
+              padding: '0.75rem 1.25rem',
+              borderTop: '0.5px solid var(--border)',
+              fontFamily: 'var(--mono)', fontSize: 12,
+              color: data.ok ? 'var(--c-ok)' : 'var(--c-crit)',
+              display: 'flex', alignItems: 'center', gap: 8,
+            }}>
+              <i className={`ti ${data.ok ? 'ti-circle-check' : 'ti-circle-x'}`} aria-hidden="true" />
+              {data.summary}
+            </div>
+          )}
+        </div>
+      </div>
+    </>
   )
 }
 
@@ -190,7 +323,8 @@ export default function SettingsView() {
   const [saveStatus, setSaveStatus] = useState('idle')  // idle | saving | saved | error | copied
   const [saveMsg,    setSaveMsg]    = useState('')
   const [showEnv,    setShowEnv]    = useState(false)
-  const [alertStatus, setAlertStatus] = useState(null)  // { active_count, active }
+  const [alertStatus,  setAlertStatus]  = useState(null)  // { active_count, active }
+  const [siemStatus,   setSiemStatus]   = useState(null)
   const [testWebhook, setTestWebhook] = useState('idle') // idle | sending | ok | error
   const [testWebhookMsg, setTestWebhookMsg] = useState('')
   const [importStatus, setImportStatus] = useState('idle')  // idle | ok | error
@@ -198,6 +332,7 @@ export default function SettingsView() {
   const importFileRef = useRef(null)
   const [appVersion,   setAppVersion]   = useState(null)
   const [updateStatus, setUpdateStatus] = useState(null)  // null | checking | available | downloading | ready | current | error
+  const [diagnoseModal, setDiagnoseModal] = useState(null) // null | { title, running, steps, summary, ok }
 
   const u = useCallback((section, field, value) => {
     setCfg(c => section
@@ -220,6 +355,10 @@ export default function SettingsView() {
 
     apiFetch('/api/alerts/status')
       .then(setAlertStatus)
+      .catch(() => {})
+
+    apiFetch('/api/siem/status')
+      .then(setSiemStatus)
       .catch(() => {})
 
     getBaseUrl().then(b => {
@@ -254,6 +393,24 @@ export default function SettingsView() {
       setTestWebhookMsg(e.message)
     }
     setTimeout(() => setTestWebhook('idle'), 5000)
+  }
+
+  async function runDiagnose(endpoint, body, title) {
+    setDiagnoseModal({ title, running: true, steps: [], summary: '', ok: null })
+    try {
+      const base = await getBaseUrl()
+      const res  = await fetch(`${base}/setup/diagnose/${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(35000),
+      })
+      const data = res.ok ? await res.json()
+                          : { steps: [], ok: false, summary: `Server error ${res.status}` }
+      setDiagnoseModal({ title, running: false, steps: data.steps ?? [], summary: data.summary ?? '', ok: data.ok })
+    } catch (e) {
+      setDiagnoseModal({ title, running: false, steps: [], summary: e.message, ok: false })
+    }
   }
 
   function exportConfig() {
@@ -325,17 +482,27 @@ export default function SettingsView() {
       if (isElectron) {
         await window.glassplane.writeEnv(content)
         await apiFetch('/setup/reload', { method: 'POST' })
-        setSaveStatus('saved')
-        setSaveMsg('Saved and reloaded — changes are live.')
       } else {
+        // Server mode: POST .env content to backend directly
+        await apiFetch('/setup/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content }),
+        })
+      }
+      setSaveStatus('saved')
+      setSaveMsg('Saved and reloaded — changes are live.')
+    } catch (e) {
+      // Fall back to clipboard if server save fails (e.g. read-only .env)
+      try {
         await navigator.clipboard.writeText(content)
         setSaveStatus('copied')
-        setSaveMsg('Copied to clipboard. Save as backend/.env and restart the server.')
+        setSaveMsg('Server save failed — copied to clipboard instead.')
         setTimeout(() => setSaveStatus('idle'), 4000)
+      } catch {
+        setSaveStatus('error')
+        setSaveMsg(e.message)
       }
-    } catch (e) {
-      setSaveStatus('error')
-      setSaveMsg(e.message)
     }
   }
 
@@ -380,6 +547,7 @@ export default function SettingsView() {
 
   return (
     <div style={{ maxWidth: 600 }}>
+      <DiagnoseModal data={diagnoseModal} onClose={() => setDiagnoseModal(null)} />
       <h2 style={{ fontSize: 18, fontWeight: 500, marginBottom: '1.5rem' }}>Settings</h2>
 
       {/* Backend status */}
@@ -395,10 +563,11 @@ export default function SettingsView() {
       <Section icon="ti-shield-lock" title="Security">
         <Field
           label="API KEY"
-          value={cfg.apiKey}
+          value={cfg.apiKey ?? ''}
           onChange={v => u(null, 'apiKey', v)}
           type="password"
           placeholder="leave blank to disable auth"
+          configured={cfg.apiKeyConfigured ?? false}
         />
         <Field
           label="ALLOWED ORIGINS"
@@ -419,7 +588,7 @@ export default function SettingsView() {
           </div>
         </Row>
         <Field label="USERNAME" value={cfg.vcenter.user} onChange={v => u('vcenter', 'user', v)} placeholder="administrator@vsphere.local" />
-        <Field label="PASSWORD" value={cfg.vcenter.password} onChange={v => u('vcenter', 'password', v)} type="password" />
+        <Field label="PASSWORD" value={cfg.vcenter.password} onChange={v => u('vcenter', 'password', v)} type="password" configured={cfg.vcenter.passwordConfigured} />
         <Toggle label="Verify SSL certificate" checked={cfg.vcenter.sslVerify} onChange={v => u('vcenter', 'sslVerify', v)} />
         <TestRow
           disabled={!cfg.vcenter.host || !cfg.vcenter.user || !cfg.vcenter.password}
@@ -433,7 +602,7 @@ export default function SettingsView() {
         <div style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--muted)' }}>
           Fill access token (static) or OAuth credentials — whichever applies.
         </div>
-        <Field label="ACCESS TOKEN (static)" value={cfg.aruba.accessToken} onChange={v => u('aruba', 'accessToken', v)} type="password" placeholder="optional" />
+        <Field label="ACCESS TOKEN (static)" value={cfg.aruba.accessToken} onChange={v => u('aruba', 'accessToken', v)} type="password" placeholder="optional" configured={cfg.aruba.accessTokenConfigured} />
         <Row>
           <div style={{ flex: 1 }}>
             <Field label="CLIENT ID" value={cfg.aruba.clientId} onChange={v => u('aruba', 'clientId', v)} placeholder="optional" />
@@ -442,7 +611,7 @@ export default function SettingsView() {
             <Field label="CUSTOMER ID" value={cfg.aruba.customerId} onChange={v => u('aruba', 'customerId', v)} placeholder="optional" />
           </div>
         </Row>
-        <Field label="CLIENT SECRET" value={cfg.aruba.clientSecret} onChange={v => u('aruba', 'clientSecret', v)} type="password" placeholder="optional" />
+        <Field label="CLIENT SECRET" value={cfg.aruba.clientSecret} onChange={v => u('aruba', 'clientSecret', v)} type="password" placeholder="optional" configured={cfg.aruba.clientSecretConfigured} />
         <TestRow
           disabled={!cfg.aruba.accessToken && !cfg.aruba.clientId}
           onTest={() => testConnector('aruba', { base_url: cfg.aruba.baseUrl, access_token: cfg.aruba.accessToken, client_id: cfg.aruba.clientId, client_secret: cfg.aruba.clientSecret, customer_id: cfg.aruba.customerId })}
@@ -463,7 +632,7 @@ export default function SettingsView() {
           </div>
         </Row>
         <Field label="USERNAME" value={cfg.arubaWireless?.user ?? ''} onChange={v => u('arubaWireless', 'user', v)} placeholder="admin" />
-        <Field label="PASSWORD" value={cfg.arubaWireless?.password ?? ''} onChange={v => u('arubaWireless', 'password', v)} type="password" />
+        <Field label="PASSWORD" value={cfg.arubaWireless?.password ?? ''} onChange={v => u('arubaWireless', 'password', v)} type="password" configured={cfg.arubaWireless?.passwordConfigured} />
         <TestRow
           disabled={!cfg.arubaWireless?.host || !cfg.arubaWireless?.user || !cfg.arubaWireless?.password}
           onTest={() => testConnector('aruba-wireless', {
@@ -472,6 +641,12 @@ export default function SettingsView() {
             password: cfg.arubaWireless?.password,
             port: cfg.arubaWireless?.port ?? 4343,
           })}
+          onDiagnose={() => runDiagnose('aruba-wireless', {
+            host: cfg.arubaWireless?.host,
+            user: cfg.arubaWireless?.user,
+            password: cfg.arubaWireless?.password,
+            port: cfg.arubaWireless?.port ?? 4343,
+          }, `Aruba Wireless — ${cfg.arubaWireless?.host}`)}
         />
       </Section>
 
@@ -497,7 +672,7 @@ export default function SettingsView() {
             <Field label="SSH PORT" value={String(cfg.arubaDirectSwitches?.sshPort ?? 22)} onChange={v => u('arubaDirectSwitches', 'sshPort', parseInt(v) || 22)} />
           </div>
         </Row>
-        <Field label="PASSWORD" value={cfg.arubaDirectSwitches?.password ?? ''} onChange={v => u('arubaDirectSwitches', 'password', v)} type="password" />
+        <Field label="PASSWORD" value={cfg.arubaDirectSwitches?.password ?? ''} onChange={v => u('arubaDirectSwitches', 'password', v)} type="password" configured={cfg.arubaDirectSwitches?.passwordConfigured} />
         <Toggle label="Verify SSL certificate" checked={cfg.arubaDirectSwitches?.sslVerify ?? false} onChange={v => u('arubaDirectSwitches', 'sslVerify', v)} />
         <TestRow
           disabled={!cfg.arubaDirectSwitches?.hosts || !cfg.arubaDirectSwitches?.user || !cfg.arubaDirectSwitches?.password}
@@ -512,6 +687,17 @@ export default function SettingsView() {
               ssl_verify: cfg.arubaDirectSwitches?.sslVerify ?? false,
             })
           }}
+          onDiagnose={() => {
+            const firstHost = (cfg.arubaDirectSwitches?.hosts ?? '').split(',')[0].trim()
+            runDiagnose('aruba-direct', {
+              host: firstHost,
+              user: cfg.arubaDirectSwitches?.user,
+              password: cfg.arubaDirectSwitches?.password,
+              port: cfg.arubaDirectSwitches?.port ?? 443,
+              ssh_port: cfg.arubaDirectSwitches?.sshPort ?? 22,
+              ssl_verify: cfg.arubaDirectSwitches?.sslVerify ?? false,
+            }, `Direct Switch — ${firstHost}`)
+          }}
         />
       </Section>
 
@@ -522,11 +708,11 @@ export default function SettingsView() {
             <Field label="HOST / IP" value={cfg.alletra.host} onChange={v => u('alletra', 'host', v)} placeholder="alletra6k.local" />
           </div>
           <div style={{ flex: 1 }}>
-            <Field label="WSAPI PORT" value={String(cfg.alletra.port)} onChange={v => u('alletra', 'port', parseInt(v) || 8080)} />
+            <Field label="REST API PORT" value={String(cfg.alletra.port)} onChange={v => u('alletra', 'port', parseInt(v) || 5392)} />
           </div>
         </Row>
-        <Field label="USERNAME" value={cfg.alletra.user} onChange={v => u('alletra', 'user', v)} placeholder="3paradm" />
-        <Field label="PASSWORD" value={cfg.alletra.password} onChange={v => u('alletra', 'password', v)} type="password" />
+        <Field label="USERNAME" value={cfg.alletra.user} onChange={v => u('alletra', 'user', v)} placeholder="admin" />
+        <Field label="PASSWORD" value={cfg.alletra.password} onChange={v => u('alletra', 'password', v)} type="password" configured={cfg.alletra.passwordConfigured} />
         <TestRow
           disabled={!cfg.alletra.host || !cfg.alletra.user || !cfg.alletra.password}
           onTest={() => testConnector('alletra', { host: cfg.alletra.host, user: cfg.alletra.user, password: cfg.alletra.password, port: cfg.alletra.port })}
@@ -544,7 +730,7 @@ export default function SettingsView() {
           </div>
         </Row>
         <Field label="USERNAME" value={cfg.veeam.user} onChange={v => u('veeam', 'user', v)} placeholder="administrator" />
-        <Field label="PASSWORD" value={cfg.veeam.password} onChange={v => u('veeam', 'password', v)} type="password" />
+        <Field label="PASSWORD" value={cfg.veeam.password} onChange={v => u('veeam', 'password', v)} type="password" configured={cfg.veeam.passwordConfigured} />
         <TestRow
           disabled={!cfg.veeam.host || !cfg.veeam.user || !cfg.veeam.password}
           onTest={() => testConnector('veeam', { host: cfg.veeam.host, user: cfg.veeam.user, password: cfg.veeam.password, port: cfg.veeam.port })}
@@ -567,7 +753,7 @@ export default function SettingsView() {
             <Field label="PORT" value={String(cfg.ilo?.port ?? 443)} onChange={v => u('ilo', 'port', parseInt(v) || 443)} />
           </div>
         </Row>
-        <Field label="PASSWORD" value={cfg.ilo?.password ?? ''} onChange={v => u('ilo', 'password', v)} type="password" />
+        <Field label="PASSWORD" value={cfg.ilo?.password ?? ''} onChange={v => u('ilo', 'password', v)} type="password" configured={cfg.ilo?.passwordConfigured} />
         <Toggle label="Verify SSL certificate" checked={cfg.ilo?.sslVerify ?? false} onChange={v => u('ilo', 'sslVerify', v)} />
         <Field
           label="HOST MAP — iLO → server name (comma-separated ilo_ip=server_name pairs)"
@@ -600,6 +786,98 @@ export default function SettingsView() {
         </div>
       </Section>
 
+      {/* KACE SMA */}
+      <Section icon="ti-ticket" title="KACE SMA Service Desk" iconColor="var(--c-blue)">
+        <Row>
+          <div style={{ flex: 3 }}>
+            <Field label="HOST" value={cfg.kace?.host ?? ''} onChange={v => u('kace', 'host', v)} placeholder="kace.lab.local" />
+          </div>
+          <div style={{ flex: 1 }}>
+            <Field label="PORT" value={String(cfg.kace?.port ?? 443)} onChange={v => u('kace', 'port', parseInt(v) || 443)} />
+          </div>
+        </Row>
+        <Row>
+          <div style={{ flex: 2 }}>
+            <Field label="USERNAME" value={cfg.kace?.user ?? ''} onChange={v => u('kace', 'user', v)} placeholder="admin" />
+          </div>
+          <div style={{ flex: 2 }}>
+            <Field label="PASSWORD" value={cfg.kace?.password ?? ''} onChange={v => u('kace', 'password', v)} type="password" configured={cfg.kace?.passwordConfigured} />
+          </div>
+          <div style={{ flex: 2 }}>
+            <Field label="ORGANIZATION" value={cfg.kace?.org ?? 'Default'} onChange={v => u('kace', 'org', v)} placeholder="Default" />
+          </div>
+        </Row>
+        <Row>
+          <div style={{ flex: 1 }}>
+            <Field label="HELPDESK QUEUE NAME" value={cfg.kace?.helpdeskQueue ?? 'Helpdesk'} onChange={v => u('kace', 'helpdeskQueue', v)} placeholder="Helpdesk" />
+          </div>
+          <div style={{ flex: 1 }}>
+            <Field label="ENGINEERING QUEUE NAME" value={cfg.kace?.engineeringQueue ?? 'Engineering'} onChange={v => u('kace', 'engineeringQueue', v)} placeholder="Engineering" />
+          </div>
+        </Row>
+        <TestRow
+          disabled={!cfg.kace?.host || !cfg.kace?.user || !cfg.kace?.password}
+          onTest={() => testConnector('kace', { host: cfg.kace.host, user: cfg.kace.user, password: cfg.kace.password, org: cfg.kace.org ?? 'Default', port: cfg.kace.port ?? 443 })}
+        />
+      </Section>
+
+      {/* TLS Certificates */}
+      <Section icon="ti-certificate" title="TLS Certificate Monitoring" iconColor="var(--c-blue)">
+        <Field
+          label="HOSTS (comma-separated host[:port])"
+          value={cfg.certs?.hosts ?? ''}
+          onChange={v => u('certs', 'hosts', v)}
+          placeholder="vcenter.lab.local, exchange.lab.local:443, app.lab.local:8443"
+        />
+        <Row>
+          <div style={{ flex: 1, maxWidth: 160 }}>
+            <Field
+              label="WARN DAYS"
+              value={String(cfg.certs?.warnDays ?? 30)}
+              onChange={v => u('certs', 'warnDays', parseInt(v) || 30)}
+            />
+          </div>
+          <div style={{ flex: 1, maxWidth: 160 }}>
+            <Field
+              label="CRITICAL DAYS"
+              value={String(cfg.certs?.critDays ?? 14)}
+              onChange={v => u('certs', 'critDays', parseInt(v) || 14)}
+            />
+          </div>
+          <div style={{ flex: 1, maxWidth: 160 }}>
+            <Field
+              label="CONNECT TIMEOUT (seconds)"
+              value={String(cfg.certs?.timeout ?? 10)}
+              onChange={v => u('certs', 'timeout', parseFloat(v) || 10)}
+            />
+          </div>
+        </Row>
+      </Section>
+
+      {/* Claude AI */}
+      <Section icon="ti-brain" title="Claude AI (Insights)" iconColor="var(--c-blue)">
+        <Field
+          label="ANTHROPIC API KEY"
+          value={cfg.claude?.apiKey ?? ''}
+          onChange={v => u('claude', 'apiKey', v)}
+          type="password"
+          placeholder="sk-ant-…"
+          configured={cfg.claude?.apiKeyConfigured ?? false}
+        />
+        <div style={{ flex: 1, maxWidth: 260 }}>
+          <Field
+            label="MODEL"
+            value={cfg.claude?.model ?? 'claude-sonnet-4-6'}
+            onChange={v => u('claude', 'model', v)}
+            placeholder="claude-sonnet-4-6"
+          />
+        </div>
+        <div style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--muted)', paddingTop: 2 }}>
+          Used by the AI Insights view for infrastructure pattern analysis.
+          Models: claude-opus-4-7 (most capable) · claude-sonnet-4-6 · claude-haiku-4-5-20251001 (fastest)
+        </div>
+      </Section>
+
       {/* App settings */}
       <Section icon="ti-adjustments-horizontal" title="App">
         <Row>
@@ -610,6 +888,234 @@ export default function SettingsView() {
             <Field label="LOG LEVEL" value={cfg.logLevel} onChange={v => u(null, 'logLevel', v)} placeholder="INFO" />
           </div>
         </Row>
+      </Section>
+
+      {/* Terminal Servers / RDS */}
+      <Section icon="ti-device-desktop" title="Terminal Servers / RDS">
+        <Field label="RD CONNECTION BROKER" value={cfg.rds?.broker ?? ''} onChange={v => u('rds', 'broker', v)} placeholder="broker.domain.local" />
+        <Field label="SESSION HOSTS (comma-separated, used if no broker)" value={cfg.rds?.hosts ?? ''} onChange={v => u('rds', 'hosts', v)} placeholder="ts01.domain.local, ts02.domain.local" />
+        <Row>
+          <div style={{ flex: 1 }}>
+            <ThresholdField label="CPU warn %" value={cfg.rds?.warnLoadPct ?? 75} onChange={v => u('rds', 'warnLoadPct', v)} unit="%" min={1} step={5} width={64} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <ThresholdField label="CPU critical %" value={cfg.rds?.critLoadPct ?? 90} onChange={v => u('rds', 'critLoadPct', v)} unit="%" min={1} step={5} width={64} />
+          </div>
+        </Row>
+        <TestRow
+          onTest={() => testConnector('rds', { broker: cfg.rds?.broker ?? '', hosts: cfg.rds?.hosts ?? '' })}
+          disabled={!cfg.rds?.broker && !cfg.rds?.hosts}
+        />
+        <div style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--muted)' }}>
+          Broker mode uses the RemoteDesktop PS module (requires RSAT-RDS-Tools). Direct mode uses qwinsta + WMI against each RDSH.
+        </div>
+      </Section>
+
+      {/* FortiAnalyzer */}
+      <Section icon="ti-chart-bar" title="FortiAnalyzer">
+        <Field label="HOST / IP" value={cfg.fortianalyzer?.host ?? ''} onChange={v => u('fortianalyzer', 'host', v)} placeholder="192.168.1.2" />
+        <Row>
+          <div style={{ flex: 1 }}>
+            <Field label="USERNAME" value={cfg.fortianalyzer?.user ?? ''} onChange={v => u('fortianalyzer', 'user', v)} placeholder="admin" />
+          </div>
+          <div style={{ flex: 1 }}>
+            <Field label="ADOM" value={cfg.fortianalyzer?.adom ?? 'root'} onChange={v => u('fortianalyzer', 'adom', v)} placeholder="root" />
+          </div>
+        </Row>
+        <Field label="PASSWORD" type="password" value={cfg.fortianalyzer?.password ?? ''} onChange={v => u('fortianalyzer', 'password', v)} configured={cfg.fortianalyzer?.passwordConfigured} />
+        <Row>
+          <div style={{ flex: 1 }}>
+            <ThresholdField label="HTTPS port" value={cfg.fortianalyzer?.port ?? 443} onChange={v => u('fortianalyzer', 'port', parseInt(v))} unit="" min={1} step={1} width={72} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <ThresholdField label="Disk warn %" value={cfg.fortianalyzer?.diskWarnPct ?? 80} onChange={v => u('fortianalyzer', 'diskWarnPct', v)} unit="%" min={1} step={5} width={64} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <ThresholdField label="Disk critical %" value={cfg.fortianalyzer?.diskCritPct ?? 90} onChange={v => u('fortianalyzer', 'diskCritPct', v)} unit="%" min={1} step={5} width={64} />
+          </div>
+        </Row>
+        <TestRow
+          onTest={() => testConnector('fortianalyzer', {
+            host: cfg.fortianalyzer?.host ?? '',
+            user: cfg.fortianalyzer?.user ?? '',
+            password: cfg.fortianalyzer?.password ?? '',
+            port: cfg.fortianalyzer?.port ?? 443,
+            ssl_verify: cfg.fortianalyzer?.sslVerify ?? false,
+          })}
+          disabled={!cfg.fortianalyzer?.host || !cfg.fortianalyzer?.user}
+        />
+        <div style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--muted)' }}>
+          Uses the FortiAnalyzer JSON-RPC API. Account needs read-only access (System Settings → Admin Profiles → Read-Only).
+        </div>
+      </Section>
+
+      {/* MS Exchange */}
+      <Section icon="ti-mail" title="MS Exchange">
+        <Field label="SERVER FQDN / IP" value={cfg.exchange?.server ?? ''} onChange={v => u('exchange', 'server', v)} placeholder="mail.domain.local" />
+        <Row>
+          <div style={{ flex: 1 }}>
+            <Field label="USERNAME" value={cfg.exchange?.user ?? ''} onChange={v => u('exchange', 'user', v)} placeholder="svc-glassplane" />
+          </div>
+          <div style={{ flex: 1 }}>
+            <Field label="DOMAIN (optional)" value={cfg.exchange?.domain ?? ''} onChange={v => u('exchange', 'domain', v)} placeholder="CORP" />
+          </div>
+        </Row>
+        <Field label="PASSWORD" type="password" value={cfg.exchange?.password ?? ''} onChange={v => u('exchange', 'password', v)} configured={cfg.exchange?.passwordConfigured} />
+        <Row>
+          <div style={{ flex: 1 }}>
+            <ThresholdField label="Queue warn (msgs)" value={cfg.exchange?.transportWarnQueue ?? 50} onChange={v => u('exchange', 'transportWarnQueue', parseInt(v))} unit="" min={1} step={10} width={72} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <ThresholdField label="Queue critical (msgs)" value={cfg.exchange?.transportCritQueue ?? 200} onChange={v => u('exchange', 'transportCritQueue', parseInt(v))} unit="" min={1} step={50} width={72} />
+          </div>
+        </Row>
+        <TestRow
+          onTest={() => testConnector('exchange', {
+            server: cfg.exchange?.server ?? '',
+            user: cfg.exchange?.user ?? '',
+            password: cfg.exchange?.password ?? '',
+            domain: cfg.exchange?.domain ?? '',
+          })}
+          disabled={!cfg.exchange?.server || !cfg.exchange?.user}
+        />
+        <div style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--muted)' }}>
+          Connects via Exchange Remote PowerShell (http://server/PowerShell/). Account needs View-Only Organization Management.
+        </div>
+      </Section>
+
+      {/* FortiGate */}
+      <Section icon="ti-shield-lock" title="FortiGate Firewall">
+        <Field label="HOST / IP" value={cfg.fortigate?.host ?? ''} onChange={v => u('fortigate', 'host', v)} placeholder="192.168.1.1" />
+        <Field label="REST API TOKEN" type="password" value={cfg.fortigate?.token ?? ''} onChange={v => u('fortigate', 'token', v)} placeholder="REST API admin token" />
+        <Row>
+          <div style={{ flex: 1 }}>
+            <ThresholdField label="HTTPS port" value={cfg.fortigate?.port ?? 443} onChange={v => u('fortigate', 'port', parseInt(v))} unit="" min={1} step={1} width={72} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <Field label="VDOM" value={cfg.fortigate?.vdom ?? 'root'} onChange={v => u('fortigate', 'vdom', v)} placeholder="root" />
+          </div>
+        </Row>
+        <Row>
+          <div style={{ flex: 1 }}>
+            <ThresholdField label="CPU warn %" value={cfg.fortigate?.warnCpuPct ?? 70} onChange={v => u('fortigate', 'warnCpuPct', v)} unit="%" min={1} step={5} width={64} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <ThresholdField label="CPU critical %" value={cfg.fortigate?.critCpuPct ?? 90} onChange={v => u('fortigate', 'critCpuPct', v)} unit="%" min={1} step={5} width={64} />
+          </div>
+        </Row>
+        <TestRow
+          onTest={() => testConnector('fortigate', {
+            host: cfg.fortigate?.host ?? '',
+            token: cfg.fortigate?.token ?? '',
+            port: cfg.fortigate?.port ?? 443,
+            vdom: cfg.fortigate?.vdom ?? 'root',
+            ssl_verify: cfg.fortigate?.sslVerify ?? false,
+          })}
+          disabled={!cfg.fortigate?.host}
+        />
+        <div style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--muted)' }}>
+          Requires a REST API Admin token: System → Administrators → Create New → REST API Admin. No VDOM restrictions needed.
+        </div>
+      </Section>
+
+      {/* SIEM Integration */}
+      <Section icon="ti-radar" title="SIEM Integration" iconColor="var(--c-blue)">
+        <Toggle
+          label="Enable SIEM integration (push events + expose pull API)"
+          checked={cfg.siem?.enabled ?? false}
+          onChange={v => u('siem', 'enabled', v)}
+        />
+        <Field
+          label="PUSH URL"
+          value={cfg.siem?.pushUrl ?? ''}
+          onChange={v => u('siem', 'pushUrl', v)}
+          placeholder="http://siem-host:8100"
+        />
+        <Row>
+          <div style={{ flex: 1 }}>
+            <Field
+              label="PUSH API KEY"
+              type="password"
+              value={cfg.siem?.pushApiKey ?? ''}
+              onChange={v => u('siem', 'pushApiKey', v)}
+              placeholder="Bearer token for SIEM ingest endpoint"
+            />
+          </div>
+          <div style={{ flex: '0 0 auto' }}>
+            <ThresholdField label="Retain events" value={cfg.siem?.retainDays ?? 30} onChange={v => u('siem', 'retainDays', parseInt(v))} unit="days" min={1} step={1} width={64} />
+          </div>
+        </Row>
+        <TestRow
+          onTest={() => testConnector('siem', {
+            push_url:     cfg.siem?.pushUrl ?? '',
+            push_api_key: cfg.siem?.pushApiKey ?? '',
+          })}
+          disabled={!cfg.siem?.pushUrl}
+        />
+        {siemStatus && (
+          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--muted)', marginTop: 4 }}>
+            <span>stored: <strong style={{ color: 'var(--text)' }}>{siemStatus.events_stored ?? 0}</strong></span>
+            <span>today: <strong style={{ color: 'var(--text)' }}>{siemStatus.events_today ?? 0}</strong></span>
+            <span>pending push: <strong style={{ color: siemStatus.pending_push > 0 ? 'var(--c-warn)' : 'var(--text)' }}>{siemStatus.pending_push ?? 0}</strong></span>
+            {siemStatus.last_push_ts && (
+              <span>last push: <strong style={{ color: siemStatus.last_push_ok ? 'var(--c-ok)' : 'var(--c-crit)' }}>{new Date(siemStatus.last_push_ts).toLocaleTimeString()}</strong></span>
+            )}
+            {siemStatus.last_push_err && (
+              <span style={{ color: 'var(--c-crit)' }}>{siemStatus.last_push_err}</span>
+            )}
+          </div>
+        )}
+        <div style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--muted)' }}>
+          Pull endpoint for SIEM project: <code>GET /api/siem/events?since=&lt;ISO&gt;&amp;limit=500&amp;source=fortigate</code><br />
+          Ingest endpoint for SIEM→GlassPlane: <code>POST /api/siem/ingest</code> (accepts <code>SiemEvent[]</code>, uses your GlassPlane API key)
+        </div>
+      </Section>
+
+      {/* Wall Display */}
+      <Section icon="ti-device-tv" title="Wall Display">
+        <Toggle
+          label="Enable Wall TV Mode"
+          checked={cfg.tv?.enabled ?? false}
+          onChange={v => u('tv', 'enabled', v)}
+        />
+        <Row>
+          <div style={{ flex: 1 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <label style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--muted)' }}>RESOLUTION</label>
+              <select
+                value={cfg.tv?.resolution ?? 'hd'}
+                onChange={e => u('tv', 'resolution', e.target.value)}
+                style={{ background: 'var(--bg)', border: '0.5px solid var(--border)', borderRadius: 6, padding: '0.45rem 0.65rem', color: 'var(--text)', fontFamily: 'var(--mono)', fontSize: 12, outline: 'none' }}
+              >
+                <option value="hd">HD (1920×1080)</option>
+                <option value="4k">4K (3840×2160)</option>
+              </select>
+            </div>
+          </div>
+          <div style={{ flex: 1 }}>
+            <ThresholdField label="Auto-refresh" value={cfg.tv?.refreshSeconds ?? 30} onChange={v => u('tv', 'refreshSeconds', v)} unit="sec" min={10} step={5} width={64} />
+          </div>
+        </Row>
+        <div>
+          <button
+            onClick={() => {
+              window.glassplane?.setTvMode(cfg.tv?.resolution ?? 'hd')
+              window.dispatchEvent(new CustomEvent('glassplane:enter-tv'))
+            }}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              background: 'var(--c-blue)', color: '#fff', border: 'none',
+              borderRadius: 6, padding: '0.45rem 0.9rem',
+              fontFamily: 'var(--mono)', fontSize: 12, cursor: 'pointer',
+            }}
+          >
+            <i className="ti ti-device-tv" aria-hidden="true" />
+            Launch Wall Display
+          </button>
+        </div>
+        <div style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--muted)' }}>
+          Fullscreen dashboard for mounting on a TV or monitor. Press <kbd style={{ background: 'var(--bg)', border: '0.5px solid var(--border)', borderRadius: 4, padding: '1px 5px' }}>Esc</kbd> to exit.
+        </div>
       </Section>
 
       {/* Alerts */}
@@ -731,7 +1237,7 @@ export default function SettingsView() {
             }}
           >
             <i className={`ti ${saveStatus === 'saved' ? 'ti-check' : saveStatus === 'saving' ? 'ti-loader-2' : 'ti-device-floppy'}`} aria-hidden="true" />
-            {saveStatus === 'saving' ? 'Saving…' : saveStatus === 'saved' ? 'Saved' : isElectron ? 'Save changes' : 'Copy .env to clipboard'}
+            {saveStatus === 'saving' ? 'Saving…' : saveStatus === 'saved' ? 'Saved' : 'Save changes'}
           </button>
 
           <button

@@ -25,6 +25,9 @@ _METRICS = [
     dict(key="veeam_repo_pct",    label="Backup repo",         unit="%",  threshold=80.0, threshold_label="repo full warning", higher_is_bad=True),
     dict(key="ilo_total_power_w", label="Total power draw",    unit="W",  threshold=None, threshold_label="",                  higher_is_bad=True),
     dict(key="vc_idle",           label="Idle VMs",            unit="",   threshold=None, threshold_label="",                  higher_is_bad=True),
+    dict(key="vc_powered_on",     label="Powered-on VMs",      unit="",   threshold=None, threshold_label="",                  higher_is_bad=False),
+    dict(key="vc_cpu_max_pct",    label="Cluster CPU peak",    unit="%",  threshold=85.0, threshold_label="CPU saturation",   higher_is_bad=True),
+    dict(key="vc_ram_max_pct",    label="Cluster RAM peak",    unit="%",  threshold=90.0, threshold_label="RAM saturation",   higher_is_bad=True),
     dict(key="score",             label="Optimization score",  unit="",   threshold=50.0, threshold_label="score critical",    higher_is_bad=False),
 ]
 
@@ -52,6 +55,7 @@ class MetricForecast(BaseModel):
 class ForecastResponse(BaseModel):
     forecasts: list[MetricForecast]
     data_points: int
+    timestamps: list[float]   # epoch seconds, aligned with history arrays
 
 
 # ── Maths ──────────────────────────────────────────────────────────────────────
@@ -141,4 +145,5 @@ def get_forecast():
             history=raw,
         ))
 
-    return ForecastResponse(forecasts=forecasts, data_points=len(rows))
+    timestamps = [r["ts"] for r in rows]
+    return ForecastResponse(forecasts=forecasts, data_points=len(rows), timestamps=timestamps)

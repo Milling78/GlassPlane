@@ -16,15 +16,22 @@ from config import get_settings
 from models.schemas import (
     VCenterSummary, ArubaSummary, AlletraSummary, VeeamSummary,
     GlassplaneSummary, HealthStatus, ESXiHostDetail, VMSnapshotSummary, WirelessSummary,
-    DNSSummary,
+    DNSSummary, CertsSummary, KACESummary, VCenterEvent, RDSSummary, FortiGateSummary,
+    ExchangeSummary, FortiAnalyzerSummary,
 )
-from connectors.vcenter import fetch_vcenter_summary, fetch_vcenter_hosts, fetch_vm_snapshots
+from connectors.vcenter import fetch_vcenter_summary, fetch_vcenter_hosts, fetch_vm_snapshots, fetch_vcenter_events
 from connectors.aruba import fetch_aruba_summary, fetch_aruba_wireless
 from connectors.alletra import fetch_alletra_summary
 from connectors.veeam import fetch_veeam_summary
 from connectors.vcenter_perf import fetch_vm_surges, VMSurgeResult
 from connectors.dns import fetch_dns_summary
+from connectors.certs import fetch_certs_summary
+from connectors.kace import fetch_kace_summary
+from connectors.claude_ai import stream_analysis
 from models.surge_schemas import SurgeSummarySchema, VMSurgeResultSchema, SurgeEventSchema, SurgePeriodSchema
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel as _BaseModel
+from utils import friendly_error
 
 logger = logging.getLogger(__name__)
 
@@ -38,18 +45,19 @@ def clear_all_caches() -> None:
     _cache.clear()
 
 
-def cached(key: str):
+def cached(key: str, ttl: float | None = None):
+    """TTL cache decorator. ttl overrides cache_ttl_seconds when provided."""
     def decorator(fn: Callable):
         @wraps(fn)
         async def wrapper(*args, **kwargs):
             if key not in _locks:
                 _locks[key] = asyncio.Lock()
             async with _locks[key]:
-                ttl = get_settings().cache_ttl_seconds
+                effective_ttl = ttl if ttl is not None else get_settings().cache_ttl_seconds
                 now = time()
                 if key in _cache:
                     ts, val = _cache[key]
-                    if now - ts < ttl:
+                    if now - ts < effective_ttl:
                         return val
                 loop = asyncio.get_running_loop()
                 result = await loop.run_in_executor(None, lambda: fn(*args, **kwargs))
@@ -71,7 +79,7 @@ def get_vcenter():
         return fetch_vcenter_summary()
     except Exception as e:
         logger.error(f"vCenter error: {e}", exc_info=True)
-        raise HTTPException(status_code=502, detail=str(e))
+        raise HTTPException(status_code=502, detail=friendly_error(e))
 
 
 @vcenter_router.get("/snapshots", response_model=list[VMSnapshotSummary])
@@ -81,7 +89,34 @@ def get_snapshots():
         return fetch_vm_snapshots()
     except Exception as e:
         logger.error(f"vCenter snapshots error: {e}", exc_info=True)
-        raise HTTPException(status_code=502, detail=str(e))
+        raise HTTPException(status_code=502, detail=friendly_error(e))
+
+
+@vcenter_router.get("/events", response_model=list[VCenterEvent])
+async def get_vcenter_events(
+    hours: float = Query(default=8, ge=0.25, le=168),
+    limit: int   = Query(default=200, ge=1, le=500),
+):
+    cache_key = f"vcenter_events_{hours}_{limit}"
+    if cache_key not in _locks:
+        _locks[cache_key] = asyncio.Lock()
+    async with _locks[cache_key]:
+        effective_ttl = get_settings().cache_ttl_seconds
+        now = time()
+        if cache_key in _cache:
+            ts, val = _cache[cache_key]
+            if now - ts < effective_ttl:
+                return val
+        try:
+            loop = asyncio.get_running_loop()
+            result = await loop.run_in_executor(
+                None, lambda: fetch_vcenter_events(hours=hours, limit=limit)
+            )
+        except Exception as e:
+            logger.error(f"vCenter events error: {e}", exc_info=True)
+            raise HTTPException(status_code=502, detail=friendly_error(e))
+        _cache[cache_key] = (now, result)
+        return result
 
 
 @vcenter_router.get("/hosts", response_model=list[ESXiHostDetail])
@@ -91,7 +126,7 @@ def get_vcenter_hosts():
         return fetch_vcenter_hosts()
     except Exception as e:
         logger.error(f"vCenter hosts error: {e}", exc_info=True)
-        raise HTTPException(status_code=502, detail=str(e))
+        raise HTTPException(status_code=502, detail=friendly_error(e))
 
 
 @vcenter_router.get("/vms")
@@ -119,7 +154,7 @@ def get_vms(
             _cache["vcenter"] = (now, summary)
     except Exception as e:
         logger.error(f"vCenter error: {e}", exc_info=True)
-        raise HTTPException(status_code=502, detail=str(e))
+        raise HTTPException(status_code=502, detail=friendly_error(e))
 
     vms: list[VMSummary] = summary.vms
 
@@ -161,7 +196,7 @@ def get_aruba():
         return fetch_aruba_summary()
     except Exception as e:
         logger.error(f"Aruba error: {e}", exc_info=True)
-        raise HTTPException(status_code=502, detail=str(e))
+        raise HTTPException(status_code=502, detail=friendly_error(e))
 
 
 @aruba_router.get("/wireless", response_model=WirelessSummary)
@@ -171,7 +206,7 @@ def get_aruba_wireless():
         return fetch_aruba_wireless()
     except Exception as e:
         logger.error(f"Aruba wireless error: {e}", exc_info=True)
-        raise HTTPException(status_code=502, detail=str(e))
+        raise HTTPException(status_code=502, detail=friendly_error(e))
 
 
 @aruba_router.get("/direct")
@@ -182,7 +217,7 @@ def get_aruba_direct():
         return fetch_direct_switches()
     except Exception as e:
         logger.error(f"Aruba direct error: {e}", exc_info=True)
-        raise HTTPException(status_code=502, detail=str(e))
+        raise HTTPException(status_code=502, detail=friendly_error(e))
 
 
 @aruba_router.get("/wireless/direct", response_model=WirelessSummary)
@@ -193,7 +228,7 @@ def get_aruba_wireless_direct():
         return fetch_aruba_wireless_controller()
     except Exception as e:
         logger.error(f"Aruba wireless direct error: {e}", exc_info=True)
-        raise HTTPException(status_code=502, detail=str(e))
+        raise HTTPException(status_code=502, detail=friendly_error(e))
 
 
 # ── Alletra router ────────────────────────────────────────────────────────────
@@ -208,7 +243,7 @@ def get_alletra():
         return fetch_alletra_summary()
     except Exception as e:
         logger.error(f"Alletra error: {e}", exc_info=True)
-        raise HTTPException(status_code=502, detail=str(e))
+        raise HTTPException(status_code=502, detail=friendly_error(e))
 
 
 # ── Veeam router ──────────────────────────────────────────────────────────────
@@ -223,7 +258,7 @@ def get_veeam():
         return fetch_veeam_summary()
     except Exception as e:
         logger.error(f"Veeam error: {e}", exc_info=True)
-        raise HTTPException(status_code=502, detail=str(e))
+        raise HTTPException(status_code=502, detail=friendly_error(e))
 
 
 @veeam_router.get("/sessions")
@@ -234,7 +269,7 @@ def get_veeam_sessions(days: int = Query(default=30, ge=1, le=90)):
         return {"sessions": [s.model_dump() for s in sessions], "days": days}
     except Exception as e:
         logger.error(f"Veeam sessions error: {e}", exc_info=True)
-        raise HTTPException(status_code=502, detail=str(e))
+        raise HTTPException(status_code=502, detail=friendly_error(e))
 
 
 # ── iLO / Redfish router ─────────────────────────────────────────────────────
@@ -250,7 +285,7 @@ def get_ilo():
         return fetch_ilo_summary()
     except Exception as e:
         logger.error(f"iLO error: {e}", exc_info=True)
-        raise HTTPException(status_code=502, detail=str(e))
+        raise HTTPException(status_code=502, detail=friendly_error(e))
 
 
 # ── DNS router ────────────────────────────────────────────────────────────────
@@ -265,7 +300,53 @@ def get_dns():
         return fetch_dns_summary()
     except Exception as e:
         logger.error(f"DNS error: {e}", exc_info=True)
-        raise HTTPException(status_code=502, detail=str(e))
+        raise HTTPException(status_code=502, detail=friendly_error(e))
+
+
+# ── KACE router ──────────────────────────────────────────────────────────────
+
+kace_router = APIRouter(prefix="/kace", tags=["KACE"], dependencies=[Depends(verify_api_key)])
+
+
+@kace_router.get("/", response_model=KACESummary)
+@cached("kace")
+def get_kace():
+    try:
+        return fetch_kace_summary()
+    except Exception as e:
+        logger.error(f"KACE error: {e}", exc_info=True)
+        raise HTTPException(status_code=502, detail=friendly_error(e))
+
+
+# ── Certs router ─────────────────────────────────────────────────────────────
+
+certs_router = APIRouter(prefix="/certs", tags=["Certificates"], dependencies=[Depends(verify_api_key)])
+
+
+@certs_router.get("/", response_model=CertsSummary)
+@cached("certs", ttl=86400)
+def get_certs():
+    try:
+        return fetch_certs_summary()
+    except Exception as e:
+        logger.error(f"Certs error: {e}", exc_info=True)
+        raise HTTPException(status_code=502, detail=friendly_error(e))
+
+
+# ── RDS / Terminal Server router ─────────────────────────────────────────────
+
+rds_router = APIRouter(prefix="/rds", tags=["RDS"], dependencies=[Depends(verify_api_key)])
+
+
+@rds_router.get("/", response_model=RDSSummary)
+@cached("rds", ttl=60)
+def get_rds():
+    try:
+        from connectors.rds import fetch_rds_summary
+        return fetch_rds_summary()
+    except Exception as e:
+        logger.error(f"RDS error: {e}", exc_info=True)
+        raise HTTPException(status_code=502, detail=friendly_error(e))
 
 
 # ── Unified glassplane router ─────────────────────────────────────────────────
@@ -411,10 +492,10 @@ def _vm_surge_to_schema(r: VMSurgeResult) -> VMSurgeResultSchema:
 
 @surge_router.get("/", response_model=SurgeSummarySchema)
 def get_surges(
-    threshold: float = 80.0,
+    threshold: float = Query(default=80.0, ge=1.0, le=100.0),
     metric: str = "cpu",
-    lookback_hours: float = 2.0,
-    vm_filter: Optional[str] = None,
+    lookback_hours: float = Query(default=2.0, ge=0.5, le=168.0),
+    vm_filter: Optional[str] = Query(default=None, max_length=200),
     cyclic_only: bool = False,
 ):
     """
@@ -431,7 +512,7 @@ def get_surges(
     lookback_hours = min(max(0.5, lookback_hours), 24.0)
 
     try:
-        results = fetch_vm_surges(
+        results, vms_found = fetch_vm_surges(
             threshold_pct=threshold,
             metric=metric,
             lookback_hours=lookback_hours,
@@ -439,12 +520,13 @@ def get_surges(
         )
     except Exception as e:
         logger.error(f"Surge detection error: {e}", exc_info=True)
-        raise HTTPException(status_code=502, detail=str(e))
+        raise HTTPException(status_code=502, detail=friendly_error(e))
 
     cyclic = [r for r in results if r.is_cyclic]
     output = cyclic if cyclic_only else results
 
     return SurgeSummarySchema(
+        vms_found=vms_found,
         vms_scanned=len(results),
         vms_flagged=len(cyclic),
         threshold_pct=threshold,
@@ -452,4 +534,78 @@ def get_surges(
         lookback_hours=lookback_hours,
         cyclic_vms=[_vm_surge_to_schema(r) for r in cyclic],
         all_vms=[_vm_surge_to_schema(r) for r in output],
+    )
+
+
+# ── FortiAnalyzer router ─────────────────────────────────────────────────────
+
+fortianalyzer_router = APIRouter(prefix="/fortianalyzer", tags=["FortiAnalyzer"], dependencies=[Depends(verify_api_key)])
+
+
+@fortianalyzer_router.get("/", response_model=FortiAnalyzerSummary)
+@cached("fortianalyzer", ttl=60)
+def get_fortianalyzer():
+    try:
+        from connectors.fortianalyzer import fetch_fortianalyzer_summary
+        return fetch_fortianalyzer_summary()
+    except Exception as e:
+        logger.error(f"FortiAnalyzer error: {e}", exc_info=True)
+        raise HTTPException(status_code=502, detail=friendly_error(e))
+
+
+# ── Exchange router ──────────────────────────────────────────────────────────
+
+exchange_router = APIRouter(prefix="/exchange", tags=["Exchange"], dependencies=[Depends(verify_api_key)])
+
+
+@exchange_router.get("/", response_model=ExchangeSummary)
+@cached("exchange", ttl=120)
+def get_exchange():
+    try:
+        from connectors.exchange import fetch_exchange_summary
+        return fetch_exchange_summary()
+    except Exception as e:
+        logger.error(f"Exchange error: {e}", exc_info=True)
+        raise HTTPException(status_code=502, detail=friendly_error(e))
+
+
+# ── FortiGate router ─────────────────────────────────────────────────────────
+
+fortigate_router = APIRouter(prefix="/fortigate", tags=["FortiGate"], dependencies=[Depends(verify_api_key)])
+
+
+@fortigate_router.get("/", response_model=FortiGateSummary)
+@cached("fortigate", ttl=60)
+def get_fortigate():
+    try:
+        from connectors.fortigate import fetch_fortigate_summary
+        return fetch_fortigate_summary()
+    except Exception as e:
+        logger.error(f"FortiGate error: {e}", exc_info=True)
+        raise HTTPException(status_code=502, detail=friendly_error(e))
+
+
+# ── AI Insights router ────────────────────────────────────────────────────────
+
+ai_router = APIRouter(prefix="/ai", tags=["AI Insights"], dependencies=[Depends(verify_api_key)])
+
+
+class _AIMessage(_BaseModel):
+    role: str     # "user" | "assistant"
+    content: str
+
+
+class _AIRequest(_BaseModel):
+    messages: list[_AIMessage]
+    snapshot: Optional[dict] = None
+
+
+@ai_router.post("/stream")
+def ai_stream(req: _AIRequest):
+    """Stream an AI analysis of the infrastructure snapshot via SSE."""
+    messages = [{"role": m.role, "content": m.content} for m in req.messages]
+    return StreamingResponse(
+        stream_analysis(messages, req.snapshot),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

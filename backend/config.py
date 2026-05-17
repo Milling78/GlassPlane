@@ -24,11 +24,11 @@ class Settings(BaseSettings):
     aruba_customer_id: str = ""
     aruba_access_token: str = ""
 
-    # Alletra 6000
+    # Alletra 6000 / Nimble Storage  (Nimble REST API, default port 5392)
     alletra_host: str = ""
     alletra_user: str = ""
     alletra_password: str = ""
-    alletra_port: int = 8080
+    alletra_port: int = 5392
 
     # Veeam
     veeam_host: str = ""
@@ -40,7 +40,11 @@ class Settings(BaseSettings):
     cache_ttl_seconds: int = 60
     log_level: str = "INFO"
     api_key: str = ""
-    allowed_origins: str = "*"
+    # "null" covers Electron file:// origin; add your server URL for remote access
+    # e.g. ALLOWED_ORIGINS=https://glassplane.corp.local
+    allowed_origins: str = "null,http://localhost:5173,http://localhost:8000"
+    # Path to React dist/ for standalone server mode; auto-detected when empty
+    frontend_dist: str = ""
 
     # Alerting
     webhook_url: str = ""
@@ -90,16 +94,86 @@ class Settings(BaseSettings):
     # iLO alert thresholds
     alert_ilo_power_cap_pct: float = 90.0   # alert when power > X% of cap
     alert_ilo_error_count: int = 1          # alert when IML errors >= this
+    alert_ilo_iml_days: int = 90            # ignore IML entries older than this many days
 
     # DNS monitoring
     dns_servers: str = ""         # comma-separated DNS server IPs to poll
     dns_check_hosts: str = ""     # comma-separated hostnames to resolve
     dns_timeout: float = 5.0      # per-query timeout in seconds
 
+    # KACE SMA service desk
+    kace_host: str = ""
+    kace_user: str = ""
+    kace_password: str = ""
+    kace_org: str = "Default"
+    kace_port: int = 443
+    kace_ssl_verify: bool = False
+    kace_helpdesk_queue: str = "Helpdesk"       # queue name to pull as helpdesk feed
+    kace_engineering_queue: str = "Engineering"  # queue name to pull as engineering feed
+    kace_ticket_limit: int = 500                 # max open tickets to fetch per queue
+
+    # Certificate monitoring
+    cert_hosts: str = ""          # comma-separated host[:port] to check TLS certs
+    cert_warn_days: int = 30      # warn when cert expires within this many days
+    cert_crit_days: int = 14      # critical when cert expires within this many days
+    cert_timeout: float = 10.0    # per-host connect timeout in seconds
+
+    # Claude AI
+    anthropic_api_key: str = ""
+    claude_model: str = "claude-sonnet-4-6"
+
     # Historical snapshots
     snapshot_interval_seconds: int = 900   # 15 minutes
     snapshot_retention_days: int = 30
     db_path: str = "glassplane.db"
+
+    # Per-VM CPU/RAM time-series (used by surge calculator)
+    vm_perf_interval_seconds: int = 300    # collect one sample per VM every 5 minutes
+    vm_perf_retention_days: int = 7        # keep 7 days of per-VM perf data
+
+    # FortiAnalyzer
+    fortianalyzer_host: str = ""
+    fortianalyzer_user: str = ""
+    fortianalyzer_password: str = ""
+    fortianalyzer_port: int = 443
+    fortianalyzer_ssl_verify: bool = False
+    fortianalyzer_adom: str = "root"
+    fortianalyzer_disk_warn_pct: float = 80.0
+    fortianalyzer_disk_crit_pct: float = 90.0
+
+    # MS Exchange
+    exchange_server: str = ""
+    exchange_user: str = ""
+    exchange_password: str = ""
+    exchange_domain: str = ""         # Windows domain (optional — prepended as DOMAIN\user)
+    exchange_transport_warn_queue: int = 50    # warn when any queue exceeds this
+    exchange_transport_crit_queue: int = 200   # critical when any queue exceeds this
+
+    # FortiGate firewall
+    fortigate_host: str = ""
+    fortigate_token: str = ""          # REST API admin token (System > Administrators > REST API Admin)
+    fortigate_port: int = 443
+    fortigate_ssl_verify: bool = False
+    fortigate_vdom: str = "root"
+    fortigate_warn_cpu_pct: float = 70.0
+    fortigate_crit_cpu_pct: float = 90.0
+
+    # Terminal Server / RDS
+    rds_broker: str = ""             # FQDN of RD Connection Broker (optional)
+    rds_hosts: str = ""              # comma-separated RDSH hostnames (direct mode fallback)
+    rds_warn_load_pct: float = 75.0  # host CPU % threshold for warning
+    rds_crit_load_pct: float = 90.0  # host CPU % threshold for critical
+
+    # SIEM integration
+    siem_enabled: bool = False
+    siem_push_url: str = ""          # SIEM project endpoint — GlassPlane POSTs events here
+    siem_push_api_key: str = ""      # Bearer token for authenticating to the SIEM push endpoint
+    siem_retain_days: int = 30       # days to keep events in the local siem_events.db store
+
+    # Wall TV display mode
+    tv_mode_enabled: bool = False
+    tv_mode_resolution: str = "hd"         # hd | 4k
+    tv_mode_refresh_seconds: int = 30
 
 
 @lru_cache

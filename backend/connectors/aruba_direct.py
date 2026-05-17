@@ -7,6 +7,7 @@ Strategy (per host):
 """
 import re
 import time
+import socket
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -141,24 +142,78 @@ def _parse_uptime_secs(line: str) -> int:
     return total
 
 
+# Legacy algorithms required by older ProCurve / ArubaOS switches.
+# Appended (not replacing) so modern switches still negotiate strongest first.
+# Paramiko 3.x removed CBC ciphers and legacy MACs from its default preferred
+# list; old ProCurve switches that only advertise those would otherwise fail.
+_LEGACY_KEY_TYPES = ("ssh-rsa", "ssh-dss")
+_LEGACY_KEX       = (
+    "diffie-hellman-group14-sha1",
+    "diffie-hellman-group-exchange-sha1",
+    "diffie-hellman-group1-sha1",
+)
+_LEGACY_CIPHERS   = (
+    "aes128-cbc",
+    "aes256-cbc",
+    "3des-cbc",
+    "blowfish-cbc",
+)
+_LEGACY_MACS      = (
+    "hmac-sha1",
+    "hmac-sha1-96",
+    "hmac-md5",
+    "hmac-md5-96",
+)
+
+
+def _open_ssh_transport(host: str, port: int, user: str, password: str) -> "paramiko.Transport":
+    """
+    Open a paramiko Transport with legacy algorithm support.
+    Uses a raw socket + Transport so we can set security options
+    before the handshake (SSHClient.connect() doesn't expose this).
+    """
+    import paramiko
+
+    sock = socket.create_connection((host, port), timeout=_SSH_TIMEOUT)
+    transport = paramiko.Transport(sock)
+
+    sec = transport.get_security_options()
+    sec.key_types = tuple(dict.fromkeys(list(sec.key_types) + list(_LEGACY_KEY_TYPES)))
+    sec.kex       = tuple(dict.fromkeys(list(sec.kex)       + list(_LEGACY_KEX)))
+    sec.ciphers   = tuple(dict.fromkeys(list(sec.ciphers)   + list(_LEGACY_CIPHERS)))
+    sec.digests   = tuple(dict.fromkeys(list(sec.digests)   + list(_LEGACY_MACS)))
+
+    transport.start_client(timeout=_SSH_TIMEOUT)
+
+    # Password auth — with keyboard-interactive fallback for some Aruba builds
+    try:
+        transport.auth_password(user, password)
+    except paramiko.AuthenticationException:
+        raise
+    except Exception:
+        transport.auth_interactive_dumb(user, lambda title, instr, fields: [password] * len(fields))
+
+    return transport
+
+
 def _ssh_fetch(host: str, user: str, password: str, ssh_port: int) -> Switch:
     import paramiko
 
-    client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    client.connect(
-        host, port=ssh_port, username=user, password=password,
-        timeout=_SSH_TIMEOUT, look_for_keys=False, allow_agent=False,
-        banner_timeout=_SSH_TIMEOUT,
-    )
-
+    transport = _open_ssh_transport(host, ssh_port, user, password)
     try:
-        shell = client.invoke_shell(width=300, height=200)
-        time.sleep(1.5)
+        chan = transport.open_session()
+        chan.get_pty(width=300, height=200)
+        chan.invoke_shell()
+        shell = chan
+
+        # Wait for banner — poll every 50 ms instead of fixed 1.5 s sleep
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and not shell.recv_ready():
+            time.sleep(0.05)
         # Drain initial banner
         while shell.recv_ready():
             shell.recv(65536)
-            time.sleep(0.1)
+            time.sleep(0.05)
 
         # Disable paging (ProCurve / Provision)
         _ssh_run(shell, "no paging", wait=0.5)
@@ -166,7 +221,7 @@ def _ssh_fetch(host: str, user: str, password: str, ssh_port: int) -> Switch:
         sys_out   = _ssh_run(shell, "show system information", wait=2.5)
         brief_out = _ssh_run(shell, "show interfaces brief",   wait=3.0)
     finally:
-        client.close()
+        transport.close()
 
     # ── Parse system info ──────────────────────────────────────────────────────
     hostname = host

@@ -15,6 +15,7 @@ function UtilCell({ pct, off }) {
   )
 }
 
+
 function Chip({ label, active, onClick, color }) {
   return (
     <button
@@ -93,13 +94,14 @@ export default function VMsView({ vcenter }) {
   const [search, setSearch] = useState('')
   const [clusterFilter, setClusterFilter] = useState('all')
   const [hostFilter, setHostFilter] = useState('all')
-  const [activeFlags, setActiveFlags] = useState(new Set())  // empty = show all
+  const [activeFlags, setActiveFlags] = useState(new Set())  // empty = show all; 'off' flag removed
   const [cpuMin, setCpuMin] = useState(0)
   const [ramMin, setRamMin] = useState(0)
   const [sortKey, setSortKey] = useState('cpu_util_pct')
   const [sortDir, setSortDir] = useState('desc')
   const [selected, setSelected] = useState(new Set())
   const [showReport, setShowReport] = useState(false)
+  const [offExpanded, setOffExpanded] = useState(false)
 
   useEffect(() => {
     if (vcenter?.vms?.length) { setVms(vcenter.vms); setFetchErr(null); return }
@@ -135,13 +137,22 @@ export default function VMsView({ vcenter }) {
 
   const isFiltered = search || clusterFilter !== 'all' || hostFilter !== 'all' || activeFlags.size > 0 || cpuMin > 0 || ramMin > 0
 
+  // Powered-off VMs always go to their own section — never appear in the main table
+  const offVms = useMemo(() =>
+    [...vms]
+      .filter(v => v.power_state !== 'poweredOn')
+      .sort((a, b) => a.name.localeCompare(b.name)),
+    [vms]
+  )
+
+  // Main table only ever shows powered-on VMs
   const filtered = useMemo(() => {
-    let r = vms
+    let r = vms.filter(v => v.power_state === 'poweredOn')
     if (clusterFilter !== 'all') r = r.filter(v => v.cluster === clusterFilter)
     if (hostFilter !== 'all')    r = r.filter(v => v.host === hostFilter)
     if (activeFlags.size > 0)    r = r.filter(v => [...activeFlags].some(f => vmFlags(v).has(f)))
-    if (cpuMin > 0) r = r.filter(v => v.power_state === 'poweredOn' && v.cpu_util_pct >= cpuMin)
-    if (ramMin > 0) r = r.filter(v => v.power_state === 'poweredOn' && v.ram_util_pct >= ramMin)
+    if (cpuMin > 0) r = r.filter(v => v.cpu_util_pct >= cpuMin)
+    if (ramMin > 0) r = r.filter(v => v.ram_util_pct >= ramMin)
     if (search.trim()) {
       const q = search.toLowerCase()
       r = r.filter(v => v.name.toLowerCase().includes(q) || v.host.toLowerCase().includes(q) || v.cluster.toLowerCase().includes(q))
@@ -179,10 +190,11 @@ export default function VMsView({ vcenter }) {
 
   const selectedVms = vms.filter(v => selected.has(v.vm_id))
 
-  const idleCount      = vms.filter(v => v.is_idle).length
-  const oversizedCount = vms.filter(v => v.is_oversized).length
-  const wastedRam      = Math.round(vms.filter(v => v.is_oversized).reduce((s,v) => s + (v.ram_allocated_mb - v.ram_used_mb)/1024, 0))
-  const wastedCpu      = vms.filter(v => v.is_oversized).reduce((s,v) => s + (v.cpu_allocated_mhz - v.cpu_used_mhz)/1000, 0).toFixed(1)
+  const onVms          = useMemo(() => vms.filter(v => v.power_state === 'poweredOn'), [vms])
+  const idleCount      = onVms.filter(v => v.is_idle).length
+  const oversizedCount = onVms.filter(v => v.is_oversized).length
+  const wastedRam      = Math.round(onVms.filter(v => v.is_oversized).reduce((s,v) => s + (v.ram_allocated_mb - v.ram_used_mb)/1024, 0))
+  const wastedCpu      = onVms.filter(v => v.is_oversized).reduce((s,v) => s + (v.cpu_allocated_mhz - v.cpu_used_mhz)/1000, 0).toFixed(1)
 
   if (loading) return <div style={{ padding: '3rem', textAlign: 'center', fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--muted)' }}>loading VMs…</div>
 
@@ -200,7 +212,7 @@ export default function VMsView({ vcenter }) {
     <div>
       {/* Stats — clickable to set quick filters */}
       <div className="metrics" style={{ marginBottom: '1rem' }}>
-        <div className="metric"><div className="metric-label">total VMs</div><div className="metric-val">{vms.length}</div><div className="metric-sub">{vms.filter(v=>v.power_state==='poweredOn').length} powered on</div></div>
+        <div className="metric"><div className="metric-label">total VMs</div><div className="metric-val">{vms.length}</div><div className="metric-sub">{onVms.length} on · {offVms.length} off</div></div>
         <div className="metric" style={{ cursor: 'pointer' }} title="filter to idle VMs" onClick={() => toggleFlag('idle')}>
           <div className="metric-label">idle</div>
           <div className="metric-val" style={{ color: idleCount > 3 ? 'var(--c-warn)' : undefined }}>{idleCount}</div>
@@ -232,7 +244,7 @@ export default function VMsView({ vcenter }) {
       {/* Toolbar row 2: flag chips + thresholds + count */}
       <div style={{ display: 'flex', gap: 8, marginBottom: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
         <span style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--muted)' }}>show:</span>
-        {['idle','oversized','off','healthy'].map(f => (
+        {['idle','oversized','healthy'].map(f => (
           <Chip key={f} label={f} active={activeFlags.has(f)} color={FLAG_COLORS[f]} onClick={() => toggleFlag(f)} />
         ))}
         <div style={{ width: 1, height: 18, background: 'var(--border)', margin: '0 4px' }} />
@@ -240,7 +252,7 @@ export default function VMsView({ vcenter }) {
         <ThresholdInput label="RAM" value={ramMin} onChange={setRamMin} />
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
           <span style={{ fontSize: 12, fontFamily: 'var(--mono)', color: 'var(--muted)' }}>
-            {filtered.length} of {vms.length}
+            {filtered.length} of {vms.length - offVms.length} on
           </span>
           {isFiltered && (
             <button onClick={clearFilters} style={{ fontSize: 11, color: 'var(--muted)', background: 'transparent', border: '0.5px solid var(--border)', borderRadius: 4, padding: '2px 8px', cursor: 'pointer' }}>
@@ -289,7 +301,6 @@ export default function VMsView({ vcenter }) {
               {filtered.length === 0
                 ? <tr><td colSpan={11} style={{ textAlign: 'center', padding: '2rem', color: 'var(--muted)', fontFamily: 'var(--mono)' }}>no VMs match filters</td></tr>
                 : filtered.map(vm => {
-                  const off = vm.power_state !== 'poweredOn'
                   const isSel = selected.has(vm.vm_id)
                   return (
                     <tr key={vm.vm_id} style={{ background: isSel ? 'color-mix(in srgb, var(--c-blue) 8%, transparent)' : undefined }}>
@@ -299,9 +310,9 @@ export default function VMsView({ vcenter }) {
                       <td title={vm.name} style={{ fontWeight: 500 }}>{vm.name}</td>
                       <td>{vm.cluster}</td>
                       <td style={{ fontSize: 11, color: 'var(--muted)' }}>{vm.host}</td>
-                      <td><span className={`badge ${off ? 'b-off' : 'b-on'}`}>{off ? 'off' : 'on'}</span></td>
-                      <td><UtilCell pct={Math.round(vm.cpu_util_pct)} off={off} /></td>
-                      <td><UtilCell pct={Math.round(vm.ram_util_pct)} off={off} /></td>
+                      <td><span className="badge b-on">on</span></td>
+                      <td><UtilCell pct={Math.round(vm.cpu_util_pct)} off={false} /></td>
+                      <td><UtilCell pct={Math.round(vm.ram_util_pct)} off={false} /></td>
                       <td>{vm.cpu_allocated_mhz >= 1000 ? (vm.cpu_allocated_mhz/1000).toFixed(1)+'GHz' : vm.cpu_allocated_mhz+'MHz'}</td>
                       <td>{vm.ram_allocated_mb >= 1024 ? Math.round(vm.ram_allocated_mb/1024)+'GB' : vm.ram_allocated_mb+'MB'}</td>
                       <td>{Math.round(vm.datastore_gb)}GB</td>
@@ -309,8 +320,7 @@ export default function VMsView({ vcenter }) {
                         <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
                           {vm.is_idle      && <span className="badge b-idle">idle</span>}
                           {vm.is_oversized && <span className="badge b-oversized">oversized</span>}
-                          {off             && <span className="badge b-off">off</span>}
-                          {!vm.is_idle && !vm.is_oversized && !off && <span className="badge b-ok">ok</span>}
+                          {!vm.is_idle && !vm.is_oversized && <span className="badge b-ok">ok</span>}
                         </div>
                       </td>
                     </tr>
@@ -321,6 +331,70 @@ export default function VMsView({ vcenter }) {
           </table>
         </div>
       </div>
+      {/* Powered-off VMs */}
+      {offVms.length > 0 && (
+        <div className="card" style={{ marginTop: 12 }}>
+          <div
+            className="card-header"
+            style={{ cursor: 'pointer', userSelect: 'none' }}
+            onClick={() => setOffExpanded(v => !v)}
+          >
+            <div className="card-title" style={{ gap: 8 }}>
+              <i className="ti ti-power-off" style={{ color: 'var(--muted)', fontSize: 14 }} aria-hidden="true" />
+              <span>Powered Off</span>
+              <span style={{ fontSize: 12, fontFamily: 'var(--mono)', fontWeight: 400, color: 'var(--muted)' }}>({offVms.length})</span>
+            </div>
+            <i className={`ti ti-chevron-${offExpanded ? 'up' : 'down'}`} style={{ color: 'var(--muted)', fontSize: 13 }} aria-hidden="true" />
+          </div>
+          {offExpanded && (
+            <div className="tbl-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>VM name</th>
+                    <th>cluster</th>
+                    <th>host</th>
+                    <th>CPU alloc</th>
+                    <th>RAM alloc</th>
+                    <th>disk GB</th>
+                    <th>dormant</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {offVms.map(vm => (
+                    <tr key={vm.vm_id}>
+                      <td style={{ fontWeight: 500, color: 'var(--muted)' }}>{vm.name}</td>
+                      <td style={{ color: 'var(--muted)' }}>{vm.cluster}</td>
+                      <td style={{ fontSize: 11, color: 'var(--muted)' }}>{vm.host}</td>
+                      <td style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--muted)' }}>
+                        {vm.cpu_allocated_mhz >= 1000 ? (vm.cpu_allocated_mhz/1000).toFixed(1)+'GHz' : vm.cpu_allocated_mhz+'MHz'}
+                      </td>
+                      <td style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--muted)' }}>
+                        {vm.ram_allocated_mb >= 1024 ? Math.round(vm.ram_allocated_mb/1024)+'GB' : vm.ram_allocated_mb+'MB'}
+                      </td>
+                      <td style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--muted)' }}>{Math.round(vm.datastore_gb)}GB</td>
+                      <td style={{ fontFamily: 'var(--mono)', fontSize: 11 }}>
+                        {vm.days_offline != null ? (
+                          <span style={{ color: vm.days_offline >= 30 ? 'var(--c-crit)' : vm.days_offline >= 14 ? 'var(--c-warn)' : 'var(--muted)' }}>
+                            {vm.days_offline}d
+                            {vm.days_offline >= 30 && (
+                              <span className="badge" style={{ marginLeft: 4, background: 'rgba(239,68,68,0.12)', color: 'var(--c-crit)', border: '0.5px solid var(--c-crit)', fontSize: 9 }}>
+                                stale
+                              </span>
+                            )}
+                          </span>
+                        ) : (
+                          <span style={{ color: 'var(--muted)', opacity: 0.5 }}>—</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
     </div>
 
     {showReport && (

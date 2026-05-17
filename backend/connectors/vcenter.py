@@ -6,7 +6,7 @@ in a handful of RPCs rather than one per object per property.
 
 import ssl
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from pyVim.connect import SmartConnect, Disconnect
@@ -16,6 +16,7 @@ from config import get_settings
 from models.schemas import (
     VMSummary, ClusterSummary, VCenterSummary,
     ESXiHostDetail, SnapshotDetail, VMSnapshotSummary, HealthStatus,
+    VCenterEvent,
 )
 
 logger = logging.getLogger(__name__)
@@ -78,6 +79,34 @@ def _collect_properties(content, obj_type, paths: list[str]) -> dict:
     }
 
 
+def _query_poweroff_days(content) -> dict[str, int]:
+    """Return {vm_moId: days_since_last_poweroff} from VmPoweredOffEvent over last 90 days."""
+    try:
+        now = datetime.utcnow()
+        time_filter = vim.event.EventFilterSpec.ByTime(
+            beginTime=now - timedelta(days=90),
+            endTime=now,
+        )
+        event_filter = vim.event.EventFilterSpec(
+            eventTypeId=["VmPoweredOffEvent"],
+            time=time_filter,
+        )
+        events = content.eventManager.QueryEvents(event_filter) or []
+        result: dict[str, int] = {}
+        for ev in events:
+            vm_ref = getattr(getattr(ev, "vm", None), "vm", None)
+            if vm_ref is None:
+                continue
+            moid = vm_ref._moId
+            age  = int((now - ev.createdTime.replace(tzinfo=None)).total_seconds() / 86400)
+            if moid not in result or age < result[moid]:
+                result[moid] = age
+        return result
+    except Exception as e:
+        logger.warning(f"Power-off event query failed: {e}")
+        return {}
+
+
 def _batch_cpu_avg(perf_mgr, vm_refs: list) -> dict:
     """
     Fetch 1-hour average CPU% for every VM in a single (chunked) QueryPerf call.
@@ -131,6 +160,7 @@ def fetch_vcenter_summary() -> VCenterSummary:
             "config.uuid", "config.name", "config.cpuAllocation",
             "summary.config.numCpu", "summary.config.memorySizeMB",
             "summary.runtime.powerState", "summary.runtime.host",
+            "summary.runtime.bootTime",
             "summary.quickStats.overallCpuUsage",
             "summary.quickStats.guestMemoryUsage",
             "summary.storage.committed", "summary.storage.uncommitted",
@@ -161,7 +191,8 @@ def fetch_vcenter_summary() -> VCenterSummary:
 
         # ── 4. Batch QueryPerf for CPU history (ceil(N/64) RPCs) ─────────
         valid_refs = [r for r, p in vm_props.items() if p.get("config.uuid")]
-        avg_cpu_map = _batch_cpu_avg(perf_mgr, valid_refs)
+        avg_cpu_map   = _batch_cpu_avg(perf_mgr, valid_refs)
+        poweroff_days = _query_poweroff_days(content)
 
         # ── 5. Build VMSummary list ───────────────────────────────────────
         vms: list[VMSummary] = []
@@ -170,17 +201,18 @@ def fetch_vcenter_summary() -> VCenterSummary:
                 continue
 
             num_cpu       = p.get("summary.config.numCpu", 1) or 1
-            cpu_alloc_obj = p.get("config.cpuAllocation")
-            reservation   = (getattr(cpu_alloc_obj, "reservation", None) or 1000)
-            # reservation == -1 means "unlimited" in vSphere — treat as generous 1000 MHz/core
-            if reservation <= 0:
-                reservation = 1000
-            cpu_alloc_mhz = num_cpu * reservation
             ram_alloc_mb  = p.get("summary.config.memorySizeMB") or 0
             power_state   = str(p.get("summary.runtime.powerState", "unknown"))
             host_ref      = p.get("summary.runtime.host")
             cpu_used_mhz  = float(p.get("summary.quickStats.overallCpuUsage") or 0)
             ram_used_mb   = float(p.get("summary.quickStats.guestMemoryUsage") or 0)
+
+            # cpu_util_pct must match vCenter: usage / (vCPUs × host_clock_MHz) × 100.
+            # Using the CPU reservation as denominator (as before) is wrong — reservation
+            # is often 0 and falls back to an arbitrary 1000 MHz, inflating % by ~2×.
+            host_p        = host_props.get(host_ref) if host_ref else {}
+            host_cpu_mhz  = (host_p.get("summary.hardware.cpuMhz") or 0) if host_p else 0
+            cpu_alloc_mhz = num_cpu * (host_cpu_mhz or 1000)
 
             cpu_util = (cpu_used_mhz / cpu_alloc_mhz * 100) if cpu_alloc_mhz else 0
             ram_util = (ram_used_mb  / ram_alloc_mb  * 100) if ram_alloc_mb  else 0
@@ -203,6 +235,19 @@ def fetch_vcenter_summary() -> VCenterSummary:
             uncommitted  = p.get("summary.storage.uncommitted") or 0
             datastore_gb = (committed + uncommitted) / (1024 ** 3)
 
+            boot_raw = p.get("summary.runtime.bootTime")
+            boot_time_str: Optional[str] = None
+            if boot_raw is not None:
+                try:
+                    bt = boot_raw if boot_raw.tzinfo else boot_raw.replace(tzinfo=timezone.utc)
+                    boot_time_str = bt.isoformat()
+                except Exception:
+                    pass
+
+            days_offline: Optional[int] = None
+            if power_state != "poweredOn":
+                days_offline = poweroff_days.get(vm_ref._moId)
+
             vms.append(VMSummary(
                 vm_id=p["config.uuid"],
                 name=p.get("config.name", ""),
@@ -218,6 +263,8 @@ def fetch_vcenter_summary() -> VCenterSummary:
                 cluster=cluster_name,
                 is_idle=is_idle,
                 is_oversized=is_oversized,
+                boot_time=boot_time_str,
+                days_offline=days_offline,
             ))
 
         # ── 6. Cluster rollups (per-cluster resource usage) ──────────────
@@ -357,6 +404,66 @@ def fetch_vm_snapshots() -> list[VMSnapshotSummary]:
             ))
 
         results.sort(key=lambda r: r.oldest_days, reverse=True)
+        return results
+    finally:
+        Disconnect(si)
+
+
+# ── vCenter Events ────────────────────────────────────────────────────────────
+
+_EVENT_TYPES = [
+    "VmPoweredOnEvent", "VmPoweredOffEvent", "VmSuspendedEvent",
+    "VmMigratedEvent", "VmRelocatedEvent",
+    "VmCreatedEvent", "VmClonedEvent", "VmRemovedEvent", "VmRenamedEvent",
+    "VmReconfiguredEvent",
+    "UserLoginSessionEvent", "UserLogoutSessionEvent",
+    "TaskEvent",
+]
+
+
+def fetch_vcenter_events(hours: float = 8, limit: int = 200) -> list[VCenterEvent]:
+    s   = get_settings()
+    ctx = _build_ssl_context()
+    si  = SmartConnect(
+        host=s.vcenter_host, user=s.vcenter_user,
+        pwd=s.vcenter_password, port=s.vcenter_port, sslContext=ctx,
+    )
+    try:
+        content = si.content
+        now     = datetime.utcnow()
+        begin   = now - timedelta(hours=hours)
+
+        time_filter  = vim.event.EventFilterSpec.ByTime(beginTime=begin, endTime=now)
+        event_filter = vim.event.EventFilterSpec(
+            eventTypeId=_EVENT_TYPES,
+            time=time_filter,
+        )
+
+        collector = content.eventManager.CreateCollectorForEvents(event_filter)
+        try:
+            collector.SetCollectorPageSize(limit)
+            raw_events = collector.latestPage or []
+        finally:
+            collector.DestroyCollector()
+
+        results: list[VCenterEvent] = []
+        for ev in raw_events[:limit]:
+            vm_arg   = getattr(ev, "vm", None)
+            host_arg = getattr(ev, "host", None)
+            created  = ev.createdTime
+            if created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
+            results.append(VCenterEvent(
+                event_id=ev.key,
+                event_type=type(ev).__name__,
+                created_time=created.isoformat(),
+                message=(ev.fullFormattedMessage or "").strip(),
+                vm_name=vm_arg.name if vm_arg else None,
+                host_name=host_arg.name if host_arg else None,
+                user_name=getattr(ev, "userName", None) or None,
+            ))
+
+        results.sort(key=lambda e: e.created_time, reverse=True)
         return results
     finally:
         Disconnect(si)

@@ -29,6 +29,8 @@ class VMSummary(BaseModel):
     cluster: str
     is_idle: bool          # CPU < 5% sustained
     is_oversized: bool     # Allocated >> actual peak
+    boot_time: Optional[str] = None       # ISO-8601 UTC, powered-on VMs only
+    days_offline: Optional[int] = None    # days since last powered-off event
 
 
 class ClusterSummary(BaseModel):
@@ -200,6 +202,7 @@ class ILOHostSummary(BaseModel):
     ambient_temp_c: Optional[float] = None
     fan_status: str = "OK"       # OK | Warning | Critical
     recent_errors: list[str] = []
+    amber_conditions: list[str] = []   # conditions that would light the chassis amber LED
     status: HealthStatus = HealthStatus.OK
 
 
@@ -227,6 +230,7 @@ class DNSRecordResult(BaseModel):
     addresses: list[str] = []
     response_ms: Optional[float] = None
     error: str = ""
+    source: str = "manual"   # "manual" | integration name e.g. "vCenter"
 
 
 class DNSSummary(BaseModel):
@@ -235,6 +239,70 @@ class DNSSummary(BaseModel):
     server_count: int
     reachable_count: int
     failed_records: int
+    status: HealthStatus
+
+
+# ── KACE SMA Service Desk ─────────────────────────────────────────────────────
+
+class KACETicket(BaseModel):
+    id: int
+    title: str
+    status: str
+    priority: str
+    category: str = "Uncategorized"
+    submitter: str = ""
+    owner: str = ""
+    created: str = ""
+    modified: str = ""
+
+
+class KACETicketGroup(BaseModel):
+    category: str
+    count: int
+    high_count: int
+    medium_count: int
+    low_count: int
+    tickets: list[KACETicket]
+
+
+class KACEQueueSummary(BaseModel):
+    queue_id: int
+    queue_name: str
+    total: int
+    high_count: int
+    medium_count: int
+    low_count: int
+    groups: list[KACETicketGroup]
+
+
+class KACESummary(BaseModel):
+    helpdesk: Optional[KACEQueueSummary] = None
+    engineering: Optional[KACEQueueSummary] = None
+    total_open: int
+    status: HealthStatus
+    error: str = ""
+
+
+# ── TLS Certificates ─────────────────────────────────────────────────────────
+
+class CertResult(BaseModel):
+    host: str
+    port: int
+    cn: str = ""
+    sans: list[str] = []
+    issuer: str = ""
+    not_after: str = ""          # ISO-8601 UTC date string
+    days_remaining: int = 0
+    status: HealthStatus = HealthStatus.OK
+    error: str = ""
+
+
+class CertsSummary(BaseModel):
+    hosts: list[CertResult]
+    total: int
+    ok_count: int
+    warn_count: int
+    crit_count: int
     status: HealthStatus
 
 
@@ -288,6 +356,188 @@ class VeeamSummary(BaseModel):
     total_repo_used_gb: float
     repo_util_pct: float
     status: HealthStatus
+
+
+# ── Terminal Server / RDS ─────────────────────────────────────────────────────
+
+class RDSHostSummary(BaseModel):
+    hostname: str
+    status: str = "Unknown"          # Available | Unavailable | Drain | Unreachable | Unknown
+    active_sessions: int = 0
+    disconnected_sessions: int = 0
+    total_sessions: int = 0
+    cpu_pct: Optional[float] = None
+    ram_pct: Optional[float] = None
+    load_pct: Optional[float] = None  # broker-reported load index (0-100)
+
+
+class RDSUserSession(BaseModel):
+    username: str
+    domain: Optional[str] = None
+    state: str = "Unknown"           # Active | Disconnected
+    host: str
+    idle_minutes: Optional[int] = None
+    session_id: Optional[int] = None
+    client_name: Optional[str] = None
+
+
+class RDSSummary(BaseModel):
+    broker: str
+    host_count: int
+    total_active: int
+    total_disconnected: int
+    total_sessions: int
+    hosts: list[RDSHostSummary]
+    sessions: list[RDSUserSession]
+    status: HealthStatus
+    method: str = "unknown"          # broker | direct | unconfigured | error
+
+
+# ── FortiAnalyzer ─────────────────────────────────────────────────────────────
+
+class FortiAnalyzerDevice(BaseModel):
+    name: str
+    ip: Optional[str] = None
+    platform: str = ""
+    os_version: str = ""
+    connection_status: str = "unknown"   # up | down | unknown
+    adom: str = ""
+
+
+class FortiAnalyzerSummary(BaseModel):
+    hostname: str
+    version: str = ""
+    serial: Optional[str] = None
+    adom: str = "root"
+    device_count: int = 0
+    devices_up: int = 0
+    devices_down: int = 0
+    devices: list[FortiAnalyzerDevice] = []
+    disk_total_gb: Optional[float] = None
+    disk_used_gb: Optional[float] = None
+    disk_pct: Optional[float] = None
+    cpu_pct: Optional[float] = None
+    mem_pct: Optional[float] = None
+    status: HealthStatus
+
+
+# ── MS Exchange ──────────────────────────────────────────────────────────────
+
+class ExchangeMailboxDB(BaseModel):
+    name: str
+    server: str
+    mounted: bool
+    size_gb: Optional[float] = None
+    whitespace_gb: Optional[float] = None
+    mailbox_count: Optional[int] = None
+    copy_status: str = "Unknown"       # Healthy | Failed | Suspended | Unknown (DAG copy)
+    copy_queue_length: int = 0
+
+
+class ExchangeQueue(BaseModel):
+    identity: str
+    delivery_type: str = ""
+    message_count: int
+    status: str = ""                   # Active | Ready | Retry | Suspended
+    next_hop: Optional[str] = None
+
+
+class ExchangeServerSummary(BaseModel):
+    name: str
+    version: str = ""
+    roles: str = ""
+    components_active: int = 0
+    components_inactive: int = 0
+
+
+class ExchangeSummary(BaseModel):
+    servers: list[ExchangeServerSummary] = []
+    databases: list[ExchangeMailboxDB] = []
+    queues: list[ExchangeQueue] = []
+    dag_name: str = ""
+    total_queued: int = 0
+    databases_mounted: int = 0
+    databases_dismounted: int = 0
+    status: HealthStatus
+    method: str = "remote_ps"          # remote_ps | unconfigured | error
+
+
+# ── FortiGate ─────────────────────────────────────────────────────────────────
+
+class FortiGateInterface(BaseModel):
+    name: str
+    alias: Optional[str] = None
+    ip: Optional[str] = None
+    status: str = "unknown"        # up | down | unknown
+    rx_bytes: Optional[int] = None
+    tx_bytes: Optional[int] = None
+    speed: Optional[int] = None    # link speed Mbps
+
+
+class FortiGateVPNTunnel(BaseModel):
+    name: str
+    remote_ip: Optional[str] = None
+    status: str = "down"           # up | down
+    incoming_bytes: Optional[int] = None
+    outgoing_bytes: Optional[int] = None
+
+
+class FortiGateSSLSession(BaseModel):
+    username: str
+    source_ip: Optional[str] = None
+    duration_sec: Optional[int] = None
+    rx_bytes: Optional[int] = None
+    tx_bytes: Optional[int] = None
+
+
+class FortiGateSummary(BaseModel):
+    hostname: str
+    firmware_version: str = ""
+    serial: Optional[str] = None
+    cpu_pct: Optional[float] = None
+    mem_pct: Optional[float] = None
+    session_count: Optional[int] = None
+    ha_mode: str = "standalone"
+    ha_peers: int = 0
+    ipsec_tunnels_total: int = 0
+    ipsec_tunnels_up: int = 0
+    ipsec_tunnels_down: int = 0
+    ssl_sessions: int = 0
+    interfaces: list[FortiGateInterface] = []
+    vpn_tunnels: list[FortiGateVPNTunnel] = []
+    ssl_vpn_sessions: list[FortiGateSSLSession] = []
+    status: HealthStatus
+    vdom: str = "root"
+
+
+# ── vCenter Events ───────────────────────────────────────────────────────────
+
+class VCenterEvent(BaseModel):
+    event_id: int
+    event_type: str       # short class name, e.g. "VmPoweredOnEvent"
+    created_time: str     # ISO-8601 UTC
+    message: str
+    vm_name: Optional[str] = None
+    host_name: Optional[str] = None
+    user_name: Optional[str] = None
+
+
+# ── SIEM Integration ─────────────────────────────────────────────────────────
+
+class SiemEvent(BaseModel):
+    """Normalised event contract shared between GlassPlane and the SIEM project."""
+    id: str               # UUID4 — deduplicated on both sides
+    ts: str               # ISO-8601 UTC timestamp
+    source: str           # connector name: "fortigate" | "exchange" | "ilo" | "veeam" | …
+    severity: str         # info | low | medium | high | critical
+    category: str         # auth | network | system | backup | storage | health
+    event_type: str       # machine tag e.g. "vpn_tunnel_down", "db_dismounted"
+    message: str          # human-readable one-liner
+    host: str   = ""      # originating device hostname or IP
+    src_ip: str = ""
+    dst_ip: str = ""
+    user: str   = ""
+    raw: dict   = {}      # connector-specific context for SIEM enrichment
 
 
 # ── Unified Glassplane ────────────────────────────────────────────────────────

@@ -1,20 +1,31 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { lazy, Suspense, useState, useEffect, useCallback } from 'react'
 import { api, auth, getBaseUrl } from './api'
-import LoginView from './views/LoginView'
-import SetupView from './views/SetupView'
-import GlassplaneView from './views/GlassplaneView'
-import VMsView from './views/VMsView'
-import ArubaView from './views/ArubaView'
-import AlletraView from './views/AlletraView'
-import VeeamView from './views/VeeamView'
-import SettingsView from './views/SettingsView'
-import AlertsView from './views/AlertsView'
-import HostsView from './views/HostsView'
-import SurgeView from './views/SurgeView'
-import EfficiencyView from './views/EfficiencyView'
-import SnapshotsView from './views/SnapshotsView'
-import DNSView from './views/DNSView'
-import LogsView from './views/LogsView'
+
+const LoginView      = lazy(() => import('./views/LoginView'))
+const SetupView      = lazy(() => import('./views/SetupView'))
+const GlassplaneView = lazy(() => import('./views/GlassplaneView'))
+const VMsView        = lazy(() => import('./views/VMsView'))
+const ArubaView      = lazy(() => import('./views/ArubaView'))
+const AlletraView    = lazy(() => import('./views/AlletraView'))
+const VeeamView      = lazy(() => import('./views/VeeamView'))
+const SettingsView   = lazy(() => import('./views/SettingsView'))
+const AlertsView     = lazy(() => import('./views/AlertsView'))
+const HostsView      = lazy(() => import('./views/HostsView'))
+const SurgeView      = lazy(() => import('./views/SurgeView'))
+const EfficiencyView = lazy(() => import('./views/EfficiencyView'))
+const SnapshotsView  = lazy(() => import('./views/SnapshotsView'))
+const DNSView        = lazy(() => import('./views/DNSView'))
+const CertsView      = lazy(() => import('./views/CertsView'))
+const KACEView       = lazy(() => import('./views/KACEView'))
+const InsightsView   = lazy(() => import('./views/InsightsView'))
+const CapacityView   = lazy(() => import('./views/CapacityView'))
+const EventsView     = lazy(() => import('./views/EventsView'))
+const LogsView       = lazy(() => import('./views/LogsView'))
+const RDSView        = lazy(() => import('./views/RDSView'))
+const FortiGateView  = lazy(() => import('./views/FortiGateView'))
+const ExchangeView        = lazy(() => import('./views/ExchangeView'))
+const FortiAnalyzerView   = lazy(() => import('./views/FortiAnalyzerView'))
+const TVModeView     = lazy(() => import('./views/TVModeView'))
 
 const NAV = [
   { id: 'summary',    label: 'Overview',     icon: 'ti-layout-dashboard' },
@@ -25,8 +36,17 @@ const NAV = [
   { id: 'alletra',    label: 'Storage',      icon: 'ti-database' },
   { id: 'veeam',      label: 'Backups',      icon: 'ti-cloud-upload' },
   { id: 'hosts',      label: 'Hosts / iLO',  icon: 'ti-cpu' },
+  { id: 'rds',        label: 'Term. Servers', icon: 'ti-device-desktop' },
+  { id: 'fortigate',  label: 'FortiGate',    icon: 'ti-shield-lock' },
+  { id: 'exchange',      label: 'Exchange',      icon: 'ti-mail' },
+  { id: 'fortianalyzer', label: 'FortiAnalyzer', icon: 'ti-chart-bar' },
   { id: 'dns',        label: 'DNS',          icon: 'ti-world-www' },
+  { id: 'certs',      label: 'Certificates', icon: 'ti-certificate' },
+  { id: 'kace',       label: 'KACE Tickets', icon: 'ti-ticket' },
   { id: 'efficiency', label: 'Perf/Watt',    icon: 'ti-bolt' },
+  { id: 'insights',   label: 'AI Insights',  icon: 'ti-brain' },
+  { id: 'capacity',   label: 'Capacity',     icon: 'ti-chart-line' },
+  { id: 'events',     label: 'VC Events',    icon: 'ti-list-details' },
   { id: 'alerts',     label: 'Alerts',       icon: 'ti-bell' },
   { id: 'logs',       label: 'Logs',         icon: 'ti-terminal-2' },
 ]
@@ -40,10 +60,12 @@ export default function App() {
   const [setupNeeded, setSetupNeeded] = useState(null) // null=checking, true=show setup, false=skip
   const [apiKey, setApiKey] = useState(() => auth.getKey())
   const [view, setView] = useState('summary')
+  const [tvMode, setTvMode] = useState(false)
   const [summary, setSummary] = useState(null)
   const [history, setHistory] = useState([])
   const [iloSummary,  setIloSummary]  = useState(null)
   const [dnsSummary,  setDnsSummary]  = useState(null)
+  const [certsSummary, setCertsSummary] = useState(null)
   const [forecast, setForecast] = useState(null)
   const [activeAlertCount, setActiveAlertCount] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -71,6 +93,12 @@ export default function App() {
     }
     window.addEventListener('glassplane:unauthorized', onUnauthorized)
     return () => window.removeEventListener('glassplane:unauthorized', onUnauthorized)
+  }, [])
+
+  useEffect(() => {
+    function onEnterTv() { setTvMode(true) }
+    window.addEventListener('glassplane:enter-tv', onEnterTv)
+    return () => window.removeEventListener('glassplane:enter-tv', onEnterTv)
   }, [])
 
   const ready = setupNeeded === false && !!apiKey
@@ -119,6 +147,16 @@ export default function App() {
     }
   }, [ready])
 
+  const refreshCerts = useCallback(async () => {
+    if (!ready) return
+    try {
+      const d = await api.certs()
+      setCertsSummary(d)
+    } catch {
+      // Certs is optional — no hosts configured is normal
+    }
+  }, [ready])
+
   const refreshAlertCount = useCallback(async () => {
     if (!ready) return
     try {
@@ -139,12 +177,12 @@ export default function App() {
     }
   }, [ready])
 
-  useEffect(() => { refresh() }, [refresh])
-  useEffect(() => { refreshHistory() }, [refreshHistory])
-  useEffect(() => { refreshIlo() }, [refreshIlo])
-  useEffect(() => { refreshDns() }, [refreshDns])
-  useEffect(() => { refreshAlertCount() }, [refreshAlertCount])
-  useEffect(() => { refreshForecast() }, [refreshForecast])
+  useEffect(() => {
+    Promise.all([
+      refresh(), refreshHistory(), refreshIlo(),
+      refreshDns(), refreshCerts(), refreshAlertCount(), refreshForecast(),
+    ])
+  }, [refresh, refreshHistory, refreshIlo, refreshDns, refreshCerts, refreshAlertCount, refreshForecast])
   useEffect(() => {
     if (!ready) return
     const t = setInterval(refresh, 60_000)
@@ -172,6 +210,11 @@ export default function App() {
   }, [refreshDns, ready])
   useEffect(() => {
     if (!ready) return
+    const t = setInterval(refreshCerts, 300_000) // 5 min — certs change slowly
+    return () => clearInterval(t)
+  }, [refreshCerts, ready])
+  useEffect(() => {
+    if (!ready) return
     const t = setInterval(refreshIlo, 120_000)
     return () => clearInterval(t)
   }, [refreshIlo, ready])
@@ -187,11 +230,11 @@ export default function App() {
   }
 
   if (setupNeeded) {
-    return <SetupView onComplete={() => setSetupNeeded(false)} />
+    return <Suspense fallback={null}><SetupView onComplete={() => setSetupNeeded(false)} /></Suspense>
   }
 
   if (!apiKey) {
-    return <LoginView onLogin={key => setApiKey(key)} />
+    return <Suspense fallback={null}><LoginView onLogin={key => setApiKey(key)} /></Suspense>
   }
 
   const subsystemStatus = {
@@ -200,6 +243,8 @@ export default function App() {
     alletra: summary?.alletra?.status,
     veeam:   summary?.veeam?.status,
     dns:     dnsSummary?.status,
+    certs:   certsSummary?.status,
+    kace:    null,   // KACE is on-demand, no persistent status dot
   }
 
   return (
@@ -284,7 +329,7 @@ export default function App() {
             ? <div style={{ padding: '3rem', textAlign: 'center', fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--muted)' }}>
                 connecting to backend…
               </div>
-            : <>
+            : <Suspense fallback={<div style={{ padding: '3rem', textAlign: 'center', fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--muted)' }}>loading…</div>}>
                 {view === 'summary'  && <GlassplaneView data={summary} history={history} iloSummary={iloSummary} forecast={forecast} onNavigate={setView} />}
                 {view === 'vms'      && <VMsView vcenter={summary?.vcenter} />}
                 {view === 'surges'    && <SurgeView />}
@@ -293,13 +338,33 @@ export default function App() {
                 {view === 'alletra'  && <AlletraView data={summary?.alletra} />}
                 {view === 'veeam'    && <VeeamView data={summary?.veeam} />}
                 {view === 'hosts'      && <HostsView data={iloSummary} history={history} />}
+                {view === 'rds'        && <RDSView />}
+                {view === 'fortigate'  && <FortiGateView />}
+                {view === 'exchange'      && <ExchangeView />}
+                {view === 'fortianalyzer' && <FortiAnalyzerView />}
                 {view === 'dns'        && <DNSView data={dnsSummary} />}
+                {view === 'certs'      && <CertsView certsSummary={certsSummary} />}
+                {view === 'kace'       && <KACEView />}
                 {view === 'efficiency' && <EfficiencyView iloSummary={iloSummary} />}
+                {view === 'insights'   && <InsightsView summary={summary} iloSummary={iloSummary} certsSummary={certsSummary} />}
+                {view === 'capacity'   && <CapacityView forecast={forecast} />}
+                {view === 'events'     && <EventsView />}
                 {view === 'alerts'     && <AlertsView />}
                 {view === 'logs'       && <LogsView />}
                 {view === 'settings' && <SettingsView />}
-              </>
+              </Suspense>
           }
+          {tvMode && (
+            <Suspense fallback={null}>
+              <TVModeView
+                summary={summary}
+                iloSummary={iloSummary}
+                dnsSummary={dnsSummary}
+                certsSummary={certsSummary}
+                onExit={() => setTvMode(false)}
+              />
+            </Suspense>
+          )}
         </main>
       </div>
     </>

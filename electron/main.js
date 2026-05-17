@@ -5,6 +5,10 @@ const net = require('net')
 const fs = require('fs')
 
 const isDev = !app.isPackaged
+// Set GLASSPLANE_BACKEND_URL to point Electron at a remote server instead of
+// spawning a local backend. The local backend process is skipped entirely.
+const REMOTE_BACKEND_URL = (process.env.GLASSPLANE_BACKEND_URL || '').replace(/\/$/, '')
+
 let mainWindow = null
 let backendProcess = null
 let backendPort = 8000
@@ -107,7 +111,14 @@ function stopBackend() {
   backendProcess = null
   try {
     if (process.platform === 'win32') {
-      process.kill(proc.pid)
+      // process.kill(pid) only kills the direct child. PyInstaller --onefile
+      // spawns a child Python interpreter that survives and holds the exe locked,
+      // preventing NSIS from replacing it during an update. taskkill /T kills
+      // the entire process tree; execFileSync blocks until all processes exit.
+      require('child_process').execFileSync(
+        'taskkill', ['/F', '/T', '/PID', String(proc.pid)],
+        { stdio: 'ignore', timeout: 5000 }
+      )
     } else {
       proc.kill('SIGTERM')
     }
@@ -118,7 +129,7 @@ function stopBackend() {
 
 // ── Window ────────────────────────────────────────────────────────────────────
 
-function createWindow(port) {
+function createWindow(port, remoteUrl = '') {
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
@@ -137,12 +148,14 @@ function createWindow(port) {
   })
 
   mainWindow.webContents.on('did-finish-load', () => {
-    mainWindow.webContents.executeJavaScript(
-      `window.__BACKEND_PORT__ = ${port};`
-    )
+    if (!remoteUrl) {
+      mainWindow.webContents.executeJavaScript(`window.__BACKEND_PORT__ = ${port};`)
+    }
   })
 
-  if (isDev) {
+  if (remoteUrl) {
+    mainWindow.loadURL(remoteUrl)
+  } else if (isDev) {
     mainWindow.loadURL('http://localhost:5173')
     mainWindow.webContents.openDevTools()
   } else {
@@ -216,7 +229,7 @@ function initAutoUpdater() {
       cancelId: 1,
     }).then(({ response }) => {
       if (response === 0) {
-        autoUpdater.quitAndInstall(false, true)
+        autoUpdater.quitAndInstall(true, true)
       }
     })
   })
@@ -230,12 +243,13 @@ function initAutoUpdater() {
   setTimeout(() => autoUpdater.checkForUpdates().catch(err => console.error('[updater] checkForUpdates rejected:', err)), 10_000)
 
   ipcMain.handle('check-for-updates', () => autoUpdater.checkForUpdates())
-  ipcMain.handle('install-update',    () => autoUpdater.quitAndInstall(false, true))
+  ipcMain.handle('install-update',    () => autoUpdater.quitAndInstall(true, true))
 }
 
 // ── IPC handlers ──────────────────────────────────────────────────────────────
 
-ipcMain.handle('get-backend-port',  () => backendPort)
+ipcMain.handle('get-backend-port', () => backendPort)
+ipcMain.handle('get-backend-url',  () => REMOTE_BACKEND_URL || `http://127.0.0.1:${backendPort}`)
 ipcMain.handle('get-update-status', () => _lastUpdateStatus)
 
 ipcMain.handle('open-env-file', async () => {
@@ -258,11 +272,52 @@ ipcMain.handle('show-error', async (_, msg) => {
   await dialog.showErrorBox('Glassplane error', msg)
 })
 
+// Keys whose blank values should be preserved from the existing .env.
+// Matches any key containing PASSWORD, SECRET, TOKEN, KEY, or PASSWD (case-insensitive).
+const _CREDENTIAL_RE = /PASSWORD|SECRET|TOKEN|KEY|PASSWD/i
+
+function _mergeEnv(existing, incoming) {
+  // Parse existing .env into a map of KEY -> value (raw string after '=')
+  const existingVals = {}
+  for (const line of existing.split('\n')) {
+    const eq = line.indexOf('=')
+    if (eq === -1 || line.trimStart().startsWith('#')) continue
+    const k = line.slice(0, eq).trim()
+    const v = line.slice(eq + 1)  // preserve exactly as-is (may contain spaces/quotes)
+    existingVals[k] = v
+  }
+
+  // Re-write the incoming content: for credential keys with an empty value,
+  // substitute the existing value so passwords are never wiped by the UI.
+  return incoming.split('\n').map(line => {
+    const eq = line.indexOf('=')
+    if (eq === -1 || line.trimStart().startsWith('#')) return line
+    const k = line.slice(0, eq).trim()
+    const v = line.slice(eq + 1).trim()
+    if (v === '' && _CREDENTIAL_RE.test(k) && existingVals[k] !== undefined && existingVals[k].trim() !== '') {
+      return `${k}=${existingVals[k]}`
+    }
+    return line
+  }).join('\n')
+}
+
 ipcMain.handle('write-env', async (_, content) => {
   const envPath = isDev
     ? path.join(__dirname, '..', 'backend', '.env')
     : path.join(app.getPath('userData'), '.env')
-  fs.writeFileSync(envPath, content, 'utf8')
+
+  // Preserve existing credential values for any field left blank in the UI
+  let merged = content
+  if (fs.existsSync(envPath)) {
+    try {
+      const existing = fs.readFileSync(envPath, 'utf8')
+      merged = _mergeEnv(existing, content)
+    } catch (e) {
+      console.warn('[main] write-env merge failed, writing as-is:', e.message)
+    }
+  }
+
+  fs.writeFileSync(envPath, merged, 'utf8')
   return envPath
 })
 
@@ -277,12 +332,33 @@ ipcMain.handle('open-external', (_, url) => {
 
 ipcMain.handle('get-app-version', () => app.getVersion())
 
+ipcMain.handle('set-tv-mode', (_, resolution) => {
+  if (!mainWindow) return
+  const w = resolution === '4k' ? 3840 : 1920
+  const h = resolution === '4k' ? 2160 : 1080
+  mainWindow.setFullScreen(true)
+  mainWindow.setSize(w, h)
+  mainWindow.center()
+})
+
+ipcMain.handle('exit-tv-mode', () => {
+  if (!mainWindow) return
+  mainWindow.setFullScreen(false)
+  mainWindow.setSize(1400, 900)
+  mainWindow.center()
+})
+
 // ── App lifecycle ─────────────────────────────────────────────────────────────
 
 app.whenReady().then(async () => {
   try {
-    const port = await startBackend()
-    createWindow(port)
+    if (REMOTE_BACKEND_URL) {
+      console.log(`[main] remote backend mode → ${REMOTE_BACKEND_URL}`)
+      createWindow(0, REMOTE_BACKEND_URL)
+    } else {
+      const port = await startBackend()
+      createWindow(port)
+    }
     initAutoUpdater()
   } catch (err) {
     console.error('[main] startup error:', err)
@@ -302,7 +378,9 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
 
-app.on('before-quit', stopBackend)
+// will-quit fires after electron-updater's before-quit handler has already
+// spawned the installer and called app.exit() — safe order on all platforms.
+app.on('will-quit', stopBackend)
 
 process.on('uncaughtException', (err) => {
   console.error('[main] uncaughtException:', err)

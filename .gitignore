@@ -54,3 +54,7 @@ GlassPlane/
 # Logs
 *.log
 npm-debug.log*
+
+# Electron runtime artifacts (port files, crash logs)
+[0-9]*
+backend/=[0-9]*

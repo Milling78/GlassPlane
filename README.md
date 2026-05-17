@@ -36,10 +36,13 @@ API docs available at http://localhost:8000/docs
 
 ### Frontend (dashboard)
 
-The `infra_glassplane_dashboard` React artifact runs in the browser.
-Enter your FastAPI URL (e.g. `http://your-server:8000`) and click **connect**.
+```bash
+cd frontend
+npm install
+npm run dev
+```
 
-The dashboard also runs standalone with mock data — no backend required.
+Open `http://localhost:5173`. The Electron desktop app bundles both frontend and backend into a single installer — see `npm run dist:win`.
 
 ## Connector notes
 

@@ -5,6 +5,8 @@ Docs: https://developer.arubanetworks.com/aruba-central/reference
 """
 
 import logging
+import time
+import threading
 from typing import Any
 
 import httpx
@@ -16,33 +18,63 @@ logger = logging.getLogger(__name__)
 
 UNUSED_PORT_RX_THRESHOLD = 1.0   # ports with <1% RX util considered unused
 
+# ── OAuth token cache ─────────────────────────────────────────────────────────
+# Avoids fetching a new token on every 60-second cache miss and allows
+# automatic recovery when a static or cached token expires (401 retry).
+_token_lock   = threading.Lock()
+_cached_token: str | None = None
+_token_expiry: float = 0.0   # unix timestamp after which the token must be refreshed
 
-def _headers(token: str) -> dict:
-    return {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json",
-    }
+
+def _fetch_oauth_token(client: httpx.Client, settings) -> tuple[str, float]:
+    resp = client.post(
+        f"{settings.aruba_central_base_url}/oauth2/token",
+        data={
+            "client_id":     settings.aruba_client_id,
+            "client_secret": settings.aruba_client_secret,
+            "grant_type":    "client_credentials",
+            "customer_id":   settings.aruba_customer_id,
+        },
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    return data["access_token"], float(data.get("expires_in", 7200))
+
+
+def _invalidate_token() -> None:
+    global _cached_token, _token_expiry
+    with _token_lock:
+        _cached_token = None
+        _token_expiry = 0.0
 
 
 def _get_access_token(client: httpx.Client, settings) -> str:
     """
-    Exchange client credentials for an access token.
-    Falls back to the static ARUBA_ACCESS_TOKEN if OAuth is not configured.
+    Return a valid access token.
+    - If OAuth credentials are configured: returns a cached token, refreshing
+      automatically when it has less than 60 s of lifetime remaining.
+    - If only a static ARUBA_ACCESS_TOKEN is set: returns it as-is.
+    Callers should call _invalidate_token() and retry once on HTTP 401.
     """
+    global _cached_token, _token_expiry
+
+    if settings.aruba_client_id and settings.aruba_client_secret:
+        with _token_lock:
+            if _cached_token and time.time() < _token_expiry - 60:
+                return _cached_token
+            token, expires_in = _fetch_oauth_token(client, settings)
+            _cached_token = token
+            _token_expiry = time.time() + expires_in
+            return token
+
     if settings.aruba_access_token:
         return settings.aruba_access_token
 
-    resp = client.post(
-        f"{settings.aruba_central_base_url}/oauth2/token",
-        data={
-            "client_id": settings.aruba_client_id,
-            "client_secret": settings.aruba_client_secret,
-            "grant_type": "client_credentials",
-            "customer_id": settings.aruba_customer_id,
-        }
-    )
-    resp.raise_for_status()
-    return resp.json()["access_token"]
+    raise RuntimeError("Aruba: no access token and no OAuth credentials configured")
+
+
+def _headers(token: str) -> dict:
+    return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
 
 def _fetch_switches(client: httpx.Client, base_url: str, token: str) -> list[dict]:
@@ -100,8 +132,16 @@ def _fetch_aps(client: httpx.Client, base_url: str, token: str) -> list[dict]:
 def fetch_aruba_wireless() -> WirelessSummary:
     settings = get_settings()
     with httpx.Client(base_url=settings.aruba_central_base_url, verify=False, timeout=30) as client:
-        token   = _get_access_token(client, settings)
-        raw_aps = _fetch_aps(client, settings.aruba_central_base_url, token)
+        token = _get_access_token(client, settings)
+        try:
+            raw_aps = _fetch_aps(client, settings.aruba_central_base_url, token)
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code != 401:
+                raise
+            logger.info("Aruba: token expired (401), refreshing and retrying")
+            _invalidate_token()
+            token = _get_access_token(client, settings)
+            raw_aps = _fetch_aps(client, settings.aruba_central_base_url, token)
 
     aps: list[AccessPoint] = []
     for ap in raw_aps:
@@ -146,7 +186,15 @@ def fetch_aruba_summary() -> ArubaSummary:
         timeout=30
     ) as client:
         token = _get_access_token(client, settings)
-        raw_switches = _fetch_switches(client, settings.aruba_central_base_url, token)
+        try:
+            raw_switches = _fetch_switches(client, settings.aruba_central_base_url, token)
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code != 401:
+                raise
+            logger.info("Aruba: token expired (401), refreshing and retrying")
+            _invalidate_token()
+            token = _get_access_token(client, settings)
+            raw_switches = _fetch_switches(client, settings.aruba_central_base_url, token)
 
         switches: list[Switch] = []
         total_ports = 0

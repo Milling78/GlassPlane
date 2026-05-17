@@ -140,6 +140,24 @@ def _evaluate(s) -> list[dict]:
         except Exception as e:
             logger.warning(f"Alert check — iLO: {e}")
 
+    if s.dns_servers or s.dns_check_hosts:
+        try:
+            from connectors.dns import fetch_dns_summary
+            dns = fetch_dns_summary()
+            for srv in dns.servers:
+                if not srv.reachable:
+                    breaches.append({"key": f"dns_server_{srv.server}", "system": "DNS",
+                        "message": f"DNS server {srv.server} is unreachable: {srv.error or 'no response'}",
+                        "severity": "critical"})
+            for rec in dns.records:
+                if not rec.resolved:
+                    src = f" [{rec.source}]" if rec.source and rec.source != "manual" else ""
+                    breaches.append({"key": f"dns_record_{rec.hostname}", "system": "DNS",
+                        "message": f"Hostname '{rec.hostname}'{src} failed to resolve: {rec.error or 'unknown error'}",
+                        "severity": "critical"})
+        except Exception as e:
+            logger.warning(f"Alert check — DNS: {e}")
+
     return breaches
 
 

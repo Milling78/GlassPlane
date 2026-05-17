@@ -8,25 +8,32 @@ export const auth = {
   clearKey: ()      => localStorage.removeItem(API_KEY_STORAGE),
 }
 
-let _port = null
+let _baseUrl = null  // null = not yet resolved; '' = same-origin (browser/static mode)
 
 export async function getBaseUrl() {
-  if (_port) return `http://127.0.0.1:${_port}`
+  if (_baseUrl !== null) return _baseUrl
 
-  // Electron exposes the port via preload
   if (window.glassplane?.isElectron) {
-    _port = await window.glassplane.getBackendPort()
-    return `http://127.0.0.1:${_port}`
+    if (window.glassplane.getBackendUrl) {
+      // Supports both local (http://127.0.0.1:port) and remote (https://server) backends
+      _baseUrl = (await window.glassplane.getBackendUrl()).replace(/\/$/, '')
+    } else {
+      // Legacy fallback for older builds
+      const port = await window.glassplane.getBackendPort()
+      _baseUrl = `http://127.0.0.1:${port}`
+    }
+    return _baseUrl
   }
 
-  // Injected by Electron main after load (fallback)
+  // Injected by Electron main for local backend (legacy path)
   if (window.__BACKEND_PORT__) {
-    _port = window.__BACKEND_PORT__
-    return `http://127.0.0.1:${_port}`
+    _baseUrl = `http://127.0.0.1:${window.__BACKEND_PORT__}`
+    return _baseUrl
   }
 
-  // Plain browser dev (Vite proxy handles /api)
-  return ''
+  // Browser: same-origin — either Vite proxy (dev) or FastAPI serving static files (prod)
+  _baseUrl = ''
+  return _baseUrl
 }
 
 export async function apiFetch(path, options = {}) {
@@ -65,6 +72,7 @@ export const api = {
   },
   vcenterHosts:        () => apiFetch('/api/vcenter/hosts'),
   vcenterSnapshots:    () => apiFetch('/api/vcenter/snapshots'),
+  vcenterEvents:       (hours = 8, limit = 200) => apiFetch(`/api/vcenter/events?hours=${hours}&limit=${limit}`),
   arubaDirectSwitches:   () => apiFetch('/api/aruba/direct'),
   arubaWireless:         () => apiFetch('/api/aruba/wireless'),
   arubaWirelessDirect:   () => apiFetch('/api/aruba/wireless/direct'),
@@ -73,10 +81,51 @@ export const api = {
   veeamSessions: (days = 30) => apiFetch(`/api/veeam/sessions?days=${days}`),
   forecast:     () => apiFetch('/api/forecast/'),
   dns:          () => apiFetch('/api/dns/'),
+  certs:        () => apiFetch('/api/certs/'),
+  kace:         () => apiFetch('/api/kace/'),
+  rds:          () => apiFetch('/api/rds/'),
+  fortigate:    () => apiFetch('/api/fortigate/'),
+  exchange:     () => apiFetch('/api/exchange/'),
+  fortianalyzer: () => apiFetch('/api/fortianalyzer/'),
   logs:         (level, limit = 200) => apiFetch(`/api/logs/?${new URLSearchParams({ ...(level && level !== 'ALL' ? { level } : {}), limit })}`),
   clearLogs:    () => apiFetch('/api/logs/', { method: 'DELETE' }),
   alertStatus:  () => apiFetch('/api/alerts/status'),
   alertHistory: (limit = 100) => apiFetch(`/api/alerts/history?limit=${limit}`),
   alertCheck:   () => apiFetch('/api/alerts/check', { method: 'POST' }),
+  siemStatus:   () => apiFetch('/api/siem/status'),
+  siemEvents:   (params = {}) => {
+    const q = new URLSearchParams(params).toString()
+    return apiFetch(`/api/siem/events${q ? '?' + q : ''}`)
+  },
+  siemIngest:   (events) => apiFetch('/api/siem/ingest', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(events),
+  }),
+}
+
+/**
+ * Open a streaming SSE connection to the AI analysis endpoint.
+ * Returns the raw ReadableStream so the caller can read tokens as they arrive.
+ * Pass an AbortController signal to support stop-generation.
+ */
+export async function aiStreamFetch(messages, snapshot, signal) {
+  const base = await getBaseUrl()
+  const key  = auth.getKey()
+  const resp = await fetch(`${base}/api/ai/stream`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(key ? { Authorization: `Bearer ${key}` } : {}),
+    },
+    body: JSON.stringify({ messages, snapshot }),
+    signal,
+  })
+  if (resp.status === 401) {
+    window.dispatchEvent(new CustomEvent('glassplane:unauthorized'))
+    throw new Error('Unauthorized')
+  }
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  return resp.body // ReadableStream
 }
 

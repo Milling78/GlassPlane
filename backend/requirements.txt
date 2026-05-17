@@ -1,4 +1,5 @@
 fastapi==0.136.1
+aiofiles>=24.1.0
 uvicorn[standard]==0.46.0
 httpx==0.28.1
 pyvmomi==9.1.0.0
@@ -9,3 +10,5 @@ aiohttp==3.13.5
 cachetools==7.1.1
 paramiko==5.0.0
 dnspython==2.7.0
+cryptography>=42.0.0
+anthropic>=0.40.0

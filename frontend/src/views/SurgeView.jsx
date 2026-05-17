@@ -1,5 +1,13 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react'
 import { api } from '../api'
+import {
+  Chart,
+  LineElement, PointElement, LineController,
+  CategoryScale, LinearScale,
+  Filler, Tooltip,
+} from 'chart.js'
+
+Chart.register(LineElement, PointElement, LineController, CategoryScale, LinearScale, Filler, Tooltip)
 
 // ── Tiny Chart.js sparkline ──────────────────────────────────────────────────
 
@@ -9,15 +17,6 @@ function SurgeSparkline({ series, timestamps, surgeMinutes, threshold }) {
 
   useEffect(() => {
     if (!ref.current) return
-    if (typeof Chart === 'undefined') {
-      const ctx = ref.current.getContext('2d')
-      if (ctx) {
-        ctx.font = '12px monospace'
-        ctx.fillStyle = '#888'
-        ctx.fillText('Chart.js unavailable', 8, 20)
-      }
-      return
-    }
     if (chartRef.current) chartRef.current.destroy()
 
     const surgeSet = new Set(surgeMinutes)
@@ -128,7 +127,10 @@ export default function SurgeView() {
       if (search.trim()) params.vm_filter = search.trim()
       const d = await api.surges(params)
       setData(d)
-      if (!selected && d.cyclic_vms?.length) setSelected(d.cyclic_vms[0].vm_id)
+      if (!selected) {
+        const first = d.cyclic_vms?.[0] ?? d.all_vms?.[0]
+        if (first) setSelected(first.vm_id)
+      }
     } catch (e) {
       setError(e.message)
     } finally {
@@ -141,6 +143,14 @@ export default function SurgeView() {
   const selectedVM = useMemo(() =>
     data?.all_vms?.find(v => v.vm_id === selected),
     [data, selected]
+  )
+
+  const sortedVMs = useMemo(() =>
+    [...(data?.all_vms || [])].sort((a, b) => {
+      if (a.is_cyclic !== b.is_cyclic) return a.is_cyclic ? -1 : 1
+      return b.max_pct - a.max_pct
+    }),
+    [data]
   )
 
   return (
@@ -192,8 +202,15 @@ export default function SurgeView() {
           {/* Summary stats */}
           <div className="metrics" style={{ marginBottom: '1rem' }}>
             <div className="metric">
-              <div className="metric-label">VMs scanned</div>
-              <div className="metric-val">{data.vms_scanned}</div>
+              <div className="metric-label">VMs found</div>
+              <div className="metric-val">{data.vms_found}</div>
+            </div>
+            <div className="metric">
+              <div className="metric-label">with data</div>
+              <div className="metric-val"
+                style={{ color: data.vms_found > 0 && data.vms_scanned === 0 ? 'var(--c-crit)' : undefined }}>
+                {data.vms_scanned}
+              </div>
             </div>
             <div className="metric">
               <div className="metric-label">cyclic alerts</div>
@@ -211,36 +228,51 @@ export default function SurgeView() {
             </div>
           </div>
 
-          {data.vms_flagged === 0 ? (
+          {data.vms_found > 0 && data.vms_scanned === 0 ? (
+            <div style={{ background: '#fefce8', border: '0.5px solid #fde68a', borderRadius: 8,
+              padding: '.6rem .85rem', fontFamily: 'var(--mono)', fontSize: 12, color: '#854d0e', marginBottom: '1rem', lineHeight: 1.6 }}>
+              <strong>{data.vms_found} powered-on VMs found — no performance data yet.</strong><br />
+              The background collector samples vCenter every 5 minutes and populates data on first run.
+              If this message persists after a few minutes, check:<br />
+              &nbsp;• vCenter <strong>Administration → vCenter Server Settings → Statistics</strong> — collection must be enabled (level ≥ 1)<br />
+              &nbsp;• The GlassPlane backend log for <code>VM perf collector</code> errors
+            </div>
+          ) : data.vms_scanned === 0 ? (
             <div style={{ textAlign: 'center', padding: '2rem', fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--muted)' }}>
-              <i className="ti ti-check" style={{ fontSize: 24, color: 'var(--c-ok)', display: 'block', marginBottom: 8 }} aria-hidden="true" />
-              no cyclic patterns detected at {data.threshold_pct}% threshold
+              no powered-on VMs found
             </div>
           ) : (
             <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 12, alignItems: 'start' }}>
-              {/* Alert list */}
+              {/* VM list — all scanned VMs, cyclic ones first */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {data.cyclic_vms.map(vm => (
+                {sortedVMs.map(vm => (
                   <div key={vm.vm_id}
                     onClick={() => setSelected(vm.vm_id)}
                     className="card"
                     style={{
                       padding: '.6rem .75rem', cursor: 'pointer',
-                      borderColor: selected === vm.vm_id ? 'var(--c-crit)' : undefined,
+                      borderColor: selected === vm.vm_id ? (vm.is_cyclic ? 'var(--c-crit)' : 'var(--border-active)') : undefined,
                       borderWidth: selected === vm.vm_id ? 1.5 : undefined,
                     }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                      <span style={{ width: 8, height: 8, borderRadius: '50%', background: vm.max_pct > 90 ? 'var(--c-crit)' : 'var(--c-warn)', flexShrink: 0 }} />
+                      <span style={{
+                        width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
+                        background: vm.is_cyclic
+                          ? (vm.max_pct > 90 ? 'var(--c-crit)' : 'var(--c-warn)')
+                          : 'var(--muted)',
+                      }} />
                       <span style={{ fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{vm.name}</span>
                     </div>
                     <div style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--muted)', marginBottom: 4 }}>{vm.cluster}</div>
-                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                      {vm.periods.map((p, i) => (
+                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
+                      {vm.is_cyclic && vm.periods.map((p, i) => (
                         <span key={i} style={{ fontSize: 10, fontFamily: 'var(--mono)', background: '#fee2e2', color: '#991b1b', padding: '1px 6px', borderRadius: 3 }}>
                           {p.period_min}min
                         </span>
                       ))}
-                      <span style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--muted)' }}>peak {vm.max_pct}%</span>
+                      <span style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--muted)' }}>
+                        peak {vm.max_pct}% · avg {vm.avg_pct}%
+                      </span>
                     </div>
                   </div>
                 ))}
@@ -251,7 +283,8 @@ export default function SurgeView() {
                 <div className="card">
                   <div className="card-header">
                     <div className="card-title">
-                      <i className="ti ti-wave-sine" style={{ color: 'var(--c-crit)' }} aria-hidden="true" />
+                      <i className={`ti ti-${selectedVM.is_cyclic ? 'wave-sine' : 'chart-line'}`}
+                        style={{ color: selectedVM.is_cyclic ? 'var(--c-crit)' : 'var(--muted)' }} aria-hidden="true" />
                       {selectedVM.name}
                     </div>
                     <span style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--muted)' }}>
@@ -265,20 +298,24 @@ export default function SurgeView() {
                       surgeMinutes={selectedVM.surge_events.map(e => e.minute_offset)}
                       threshold={selectedVM.threshold_pct}
                     />
-                    <div style={{ marginTop: '0.75rem', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                      <div style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.05em' }}>
-                        detected cycles
-                      </div>
-                      {selectedVM.periods.map((p, i) => <PeriodBadge key={i} period={p} />)}
-                    </div>
-                    <div style={{ marginTop: '0.75rem', display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                      {selectedVM.surge_events.map((e, i) => (
-                        <span key={i} style={{ fontSize: 11, fontFamily: 'var(--mono)', background: 'var(--bg)',
-                          border: '0.5px solid var(--border)', borderRadius: 4, padding: '2px 8px' }}>
-                          {new Date(e.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · {e.peak_pct}%
-                        </span>
-                      ))}
-                    </div>
+                    {selectedVM.is_cyclic && (
+                      <>
+                        <div style={{ marginTop: '0.75rem', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          <div style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.05em' }}>
+                            detected cycles
+                          </div>
+                          {selectedVM.periods.map((p, i) => <PeriodBadge key={i} period={p} />)}
+                        </div>
+                        <div style={{ marginTop: '0.75rem', display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                          {selectedVM.surge_events.map((e, i) => (
+                            <span key={i} style={{ fontSize: 11, fontFamily: 'var(--mono)', background: 'var(--bg)',
+                              border: '0.5px solid var(--border)', borderRadius: 4, padding: '2px 8px' }}>
+                              {new Date(e.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · {e.peak_pct}%
+                            </span>
+                          ))}
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
               )}
